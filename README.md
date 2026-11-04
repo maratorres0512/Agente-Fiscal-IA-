@@ -1,239 +1,224 @@
 # AGENTE DE TRIAJE Y GESTIÓN DE PRUEBA — UFIJ N.º 22 QUILMES
 
-Primera versión funcional para Google Apps Script y una Google Sheet compartida. Interfaz en español, cinco usuarias, tres plantillas, medidas, tareas internas, seguimiento de pericias, ORAC, alertas y bitácora. No utiliza bibliotecas, frameworks, fuentes externas ni CDNs. No se guarda el texto del despacho.
+Aplicación interna existente, actualizada para el seguimiento durante toda la investigación. Conserva Google Apps Script, una Google Sheet compartida, HTML/CSS/JavaScript nativos, las tres plantillas y la interfaz original. No utiliza frameworks, CDNs, bibliotecas externas, servicios de IA ni almacenamiento local de causas.
 
-## 1. Crear la base y vincular Apps Script
+Las sugerencias asisten al equipo. La selección de diligencias, el despacho y las decisiones procesales corresponden exclusivamente a las integrantes de la Fiscalía.
 
-1. Ingresar con la cuenta Google institucional que administrará la aplicación.
-2. Crear una **Google Sheet vacía** y nombrarla `UFIJ22 — Triaje y prueba`.
-3. Abrir **Extensiones → Apps Script** desde esa Sheet. Es importante crear un proyecto vinculado a la planilla.
-4. Nombrar el proyecto `UFIJ22 — Gestión de prueba`.
-5. Copiar los archivos del paquete al editor con estos nombres. Para archivos `.gs`, elegir **+ → Secuencia de comandos**. Para archivos `.html`, elegir **+ → HTML**. El editor agrega la extensión: no escribirla dos veces.
+## Actualizar una instalación existente
 
-| Archivo | Tipo en Apps Script | Función |
+**Se necesita implementar una nueva versión de la Web App. No crear otra base ni volver a cargar datos ficticios.**
+
+1. Coordinar una ventana breve sin operaciones del equipo. En la Sheet elegir **Archivo → Hacer una copia**, con fecha y permisos institucionales restringidos. Conservar también la versión anterior del código.
+2. Reemplazar los archivos del mismo proyecto Apps Script por los de esta rama/versión. Conservar `SPREADSHEET_ID`, la Sheet vinculada y sus registros.
+3. Configurar `USUARIAS_EMAILS` en **Configuración del proyecto → Propiedades de la secuencia de comandos**, según el apartado de identidad. El mecanismo anterior `ALLOWED_EMAILS` ya no habilita acceso por sí solo.
+4. Desde el editor ejecutar **`migrar_`**. Agrega las columnas faltantes al final y las claves nuevas de configuración. No borra hojas, causas, medidas, tareas ni bitácora. Es repetible. Detalles en [MIGRACION.md](MIGRACION.md).
+5. Revisar el resultado y las evaluaciones que hayan quedado suspendidas por prueba necesaria pendiente. La migración corrige indicadores de madurez y deja constancia de los cambios, preservando informes e historial.
+6. En **Implementar → Administrar implementaciones → Editar → Nueva versión**, implementar como **usuario que accede a la aplicación web**. Mantener la misma implementación y URL `/exec`.
+7. Pedir al equipo que recargue la página y comprobar identidad, acceso, una ficha y filtros. Seguir [VALIDACION.md](VALIDACION.md) en una copia de demostración antes de habilitar uso productivo.
+
+Si Google no entrega la identidad o la configuración falta, la API rechaza el acceso con un mensaje de configuración. No hay un modo de producción que confíe únicamente en seleccionar un nombre.
+
+## Archivos e instalación nueva
+
+| Archivo | Tipo en el editor de Apps Script | Responsabilidad |
 |---|---|---|
-| `Code.gs` | Secuencia de comandos | Web App y entrada RPC |
-| `Modelo.gs` | Secuencia de comandos | Modelo, campos, validaciones y fechas |
-| `Repositorio.gs` | Secuencia de comandos | Hojas, inicialización, bloqueo, persistencia |
-| `Reglas.gs` | Secuencia de comandos | Triaje, sugerencias, alertas, filtros |
-| `Servicios.gs` | Secuencia de comandos | CRUD y flujos de trabajo |
-| `DatosPrueba.gs` | Secuencia de comandos | Cinco causas completamente ficticias |
+| `Code.gs` | Secuencia de comandos | Web App y API autorizada |
+| `Modelo.gs` | Secuencia de comandos | Campos, validaciones, identidad y fechas |
+| `Reglas.gs` | Secuencia de comandos | Sugerencias, deduplicación, madurez, alertas y filtros |
+| `Servicios.gs` | Secuencia de comandos | Altas, edición, confirmaciones y transiciones |
+| `Repositorio.gs` | Secuencia de comandos | Lecturas, escrituras por fila, bloqueo, migración y bitácora |
+| `DatosPrueba.gs` | Secuencia de comandos | Cinco causas ficticias para una base vacía |
 | `PruebasGoogle.gs` | Secuencia de comandos | Comprobaciones puras para ejecutar en Google |
-| `Index.html` | HTML | Estructura de la aplicación |
-| `Estilos.html` | HTML | CSS nativo dentro de `<style>` |
-| `Cliente.html` | HTML | JavaScript nativo dentro de `<script>` |
-| `Despacho.html` | HTML | Generador de texto en memoria del navegador |
+| `Index.html` | HTML | Pantalla de ingreso y estructura original |
+| `Estilos.html` | HTML | Diseño y estilos responsive |
+| `Cliente.html` | HTML | Formularios, tablero y ficha |
+| `Despacho.html` | HTML | Párrafos jurídicos modulares y generación local |
+| `appsscript.json` | Manifiesto | V8, permisos y zona horaria |
 
-Se puede usar `Instalador.html`, incluido en este repositorio: abrirlo en el navegador permite ver, copiar y descargar cada archivo. No requiere conexión ni sube archivos.
+Para una instalación nueva:
 
-6. En **Configuración del proyecto**, activar **Mostrar el archivo de manifiesto appsscript.json en el editor**.
-7. Reemplazar el contenido de `appsscript.json` por el del paquete. Incluye runtime V8, zona `America/Argentina/Buenos_Aires` y permisos de Sheets e identidad de la cuenta.
-8. Guardar todos los archivos. No cargar la carpeta `pruebas/`, el README, el instalador ni las capturas en Apps Script.
+1. Crear una Google Sheet vacía con la cuenta institucional administradora.
+2. Desde ella abrir **Extensiones → Apps Script**. El proyecto debe quedar vinculado a esa Sheet.
+3. Crear los archivos `.gs` con **+ → Secuencia de comandos** y los `.html` con **+ → HTML**. Copiar su contenido; el editor agrega la extensión, no repetirla en el nombre.
+4. En Configuración del proyecto activar **Mostrar appsscript.json en el editor** y copiar el manifiesto del repositorio.
+5. Guardar y ejecutar **`inicializar_`**, que utiliza la misma migración segura. Autorizar Sheets. Se crean `CAUSAS`, `MEDIDAS`, `TAREAS`, `BITACORA` y `CONFIGURACION`, y se guarda automáticamente `SPREADSHEET_ID`.
+6. Configurar las cuentas autorizadas como se detalla abajo y compartir la Sheet con esas cuentas, con permiso de Editor.
+7. Para demostración, en una base vacía separada ejecutar **`datosFicticios_`**. Se rechaza si hay registros. No ejecutarlo en producción.
+8. Elegir **Implementar → Nueva implementación → Aplicación web**. Ejecutar como **usuario que accede** y restringir el acceso al dominio institucional, cuando esté disponible. Si se habilita acceso a cuentas Google, la correspondencia privada de identidad seguirá limitando la API al equipo.
+9. Compartir la URL terminada en **`/exec`**, no `/dev`. Cada integrante concede permisos con su propia cuenta y elige su nombre.
 
-## 2. Inicializar las hojas
+`Instalador.html` permite consultar y copiar cada archivo y descargar un ZIP autocontenido. Es una ayuda de instalación; no instala automáticamente en Google ni contiene credenciales. No cargarlo en Apps Script. Tampoco cargar `pruebas/`, `herramientas/` ni los archivos de documentación.
 
-1. En el selector de funciones del editor elegir **`inicializar_`** y pulsar **Ejecutar**.
-2. Autorizar el acceso a las hojas de cálculo con la cuenta administradora. Si el dominio institucional exige aprobación administrativa, gestionarla con su administrador Google Workspace.
-3. Volver a la Sheet. Deben existir:
-   - `CAUSAS`
-   - `MEDIDAS`
-   - `TAREAS`
-   - `BITACORA`
-   - `CONFIGURACION`
-4. La función guarda automáticamente el ID de la base en **Propiedades de la secuencia de comandos → `SPREADSHEET_ID`**. Así todas las ejecuciones de la Web App usan la misma Sheet.
-5. La inicialización puede repetirse: no borra registros ni restablece plazos existentes. Si alguien cambia un encabezado, la aplicación avisa y detiene la operación para evitar guardar columnas equivocadas.
+## Identidad vinculada a Google
 
-Las funciones terminadas en `_` se ejecutan desde el editor; no son invocables mediante `google.script.run` desde la Web App.
+La selección inicial conserva los cinco nombres y permanece en `sessionStorage` durante la sesión de la pestaña. Cada operación verifica en el servidor que la cuenta Google activa corresponda exactamente al nombre seleccionado. La bitácora usa esa identidad validada.
 
-## 3. Validar con datos ficticios
+En las propiedades del proyecto agregar **`USUARIAS_EMAILS`** como JSON con el nombre y correo de cada integrante. Este ejemplo usa exclusivamente direcciones ficticias que deben reemplazarse **en las propiedades privadas del proyecto**, nunca en GitHub:
 
-Utilizar una base de demostración separada de la futura base de trabajo.
+```json
+{
+  "Rocío Albarracín": "cuenta-ficticia-1@example.invalid",
+  "Laura Sánchez": "cuenta-ficticia-2@example.invalid",
+  "Cecilia Attolini": "cuenta-ficticia-3@example.invalid",
+  "Andrea Ramat": "cuenta-ficticia-4@example.invalid",
+  "Mara Torres": "cuenta-ficticia-5@example.invalid"
+}
+```
 
-1. Ejecutar **`datosFicticios_`** desde el editor, después de inicializar.
-2. Se cargan cinco causas identificadas con `FICTICIA-`, una por instructora. Incluyen Tránsito, Mala praxis, Otros, potencial limitado, una evaluación vencida, medidas vencidas/reiteradas, una próxima a vencer y una causa pendiente de ORAC.
-3. No hay datos reales ni teléfonos reales. Los nombres de testigos son inventados.
-4. La carga de demostración se rechaza si ya hay causas, medidas o tareas. Nunca mezcla ejemplos con una base existente.
-5. Ejecutar **`pruebasReglas_`**. Debe devolver **10 verificaciones aprobadas**. No modifica hojas.
-6. Desplegar y recorrer los casos de prueba indicados en `VALIDACION.md`.
+Una cuenta solo puede representar a una usuaria. Se rechazan cuentas ajenas, nombres que no coincidan con la cuenta activa, cuentas repetidas en el mapa, correo vacío, JSON inválido y configuración ausente. Se pueden habilitar las integrantes gradualmente; una integrante sin correspondencia no podrá ingresar.
 
-Para iniciar producción, crear otra Sheet vacía y otro proyecto vinculado, repetir la instalación e inicializar sin ejecutar `datosFicticios_`. Esto también separa los despliegues y sus bloqueos.
+Si aparece **Google no informó la cuenta**, revisar que el despliegue ejecute como la usuaria que accede, que se haya autorizado `userinfo.email` y que las políticas de Workspace permitan obtener esa identidad. Si el dominio institucional no lo permite, debe resolverlo su administrador o ajustarse el despliegue; no desactivar la comprobación ni reemplazarla por `getEffectiveUser()` del propietario.
 
-## 4. Acceso y permisos
+Permisos: `spreadsheets` para la base por ID y `userinfo.email` para identificación. No se solicitan Gmail, Calendar, contactos, correo saliente ni servicios externos. Los editores del proyecto pueden ver sus propiedades; restringir también quién administra el código y la Sheet. No almacenar contraseñas.
 
-Configuración recomendada para el equipo:
+## Primer despacho y triaje posterior
 
-1. Compartir la Sheet únicamente con las cinco cuentas institucionales que usarán la aplicación, con permiso de **Editor**. No publicar la Sheet ni habilitar acceso por enlace para cualquier persona.
-2. En **Configuración del proyecto → Propiedades de la secuencia de comandos**, agregar `ALLOWED_EMAILS` con los cinco correos autorizados, separados por comas y sin texto adicional. Ejemplo ilustrativo: `persona1@dominio.institucional,persona2@dominio.institucional`.
-3. Estos correos son cuentas Google reales que deben completar al instalar; no están incluidos en el código ni se inventaron cuentas para las usuarias.
-4. Desplegar para ejecutar **como la usuaria que accede a la aplicación**. De esta manera cada cuenta autoriza Sheets e identificación por correo y debe tener acceso a la base.
-5. Restringir el acceso del despliegue al dominio institucional, si Google Workspace ofrece esa opción. Si se permite a usuarios con cuenta Google, mantener obligatoriamente `ALLOWED_EMAILS` para limitar la API al equipo.
+### Alta
 
-Si `ALLOWED_EMAILS` está definido y Google no informa un correo autorizado, la operación se rechaza. Si la propiedad está vacía, la API acepta la selección de una de las cinco usuarias y confía en la restricción del despliegue: solo usar ese modo en una demostración privada.
+1. **NUEVA CAUSA** abre la carga original con IPP, fechas mediante calendario, instructora, resultado y una de las tres plantillas.
+2. **REVISAR MEDIDAS Y PROPUESTA** calcula potencial donde corresponde, muestra alertas de conservación y propone diligencias. Todavía no escribe la causa ni las medidas.
+3. Aceptar o desmarcar, agregar medidas manuales y revisar el texto. Copiar a SIMP.
+4. **CONFIRMAR DESPACHO Y ACTIVAR SEGUIMIENTO** crea exclusivamente lo seleccionado, calcula plazos y registra la gestión. La IPP es única.
 
-La pantalla de selección conserva un nombre en `sessionStorage` durante la sesión de la pestaña. No solicita el nombre en cada operación. La bitácora registra ese nombre elegido. La selección no verifica que ese nombre corresponda al titular del correo; esta versión no ofrece firma digital ni autenticación por nombre. El acceso efectivo lo controlan Google y, si se configura, la lista de correos.
+### Durante la investigación
 
-Permisos declarados:
+**Editar causa** guarda los nuevos datos y recalcula el potencial. La ficha muestra **Nuevas diligencias propuestas**, comparadas con todo lo ya registrado. Ejemplos: cámaras útiles recibidas posteriormente, nuevos testigos, intervención de Policía Científica, documentación y antecedentes médicos completos.
 
-- `spreadsheets`: leer y escribir la base central mediante su ID.
-- `userinfo.email`: comprobar la cuenta activa frente a la lista de acceso.
+- La edición no crea medidas ni recibe, cancela o altera las que ya fueron ordenadas.
+- Desmarcar las propuestas que no se ordenarán en esa revisión.
+- **CONFIRMAR NUEVAS DILIGENCIAS Y ACTIVAR SEGUIMIENTO** activa únicamente las seleccionadas. Las no seleccionadas siguen disponibles en próximas revisiones; no se interpretan como una decisión procesal definitiva.
+- Las confirmadas desaparecen de la lista, aunque luego se reiteren o reciban. La fecha de solicitud y las alertas de las anteriores se conservan.
+- Para una diligencia efectivamente distinta de la misma categoría, usar **AGREGAR MEDIDA**. Elegir categoría, naturaleza (Requerimiento / Ampliación / Nueva pericia), descripción, organismo, fecha y plazo. Se conserva cada registro anterior.
+- **Reiterada** corresponde a un requerimiento existente y queda en su misma fila, con la gestión en bitácora. No es un pedido nuevo.
+- **Rol en evaluación** permite marcar una medida existente como principal o necesaria para la evaluación final, con auditoría. El dictamen original y las complementarias médicas conservan su carácter necesario.
 
-No se solicitan permisos de Gmail, Calendar, contactos, servicios externos ni Drive para copias automáticas. Las copias se hacen manualmente desde Sheets.
+El tipo de investigación queda fijo después de la confirmación, como en la primera versión. Corregir un tipo erróneo requiere una carga correcta y tratar la equivocada según la política de conservación aplicable; nunca se transforma silenciosamente un flujo en otro.
 
-## 5. Desplegar como Web App
+## Cámaras y conservación urgente
 
-1. En Apps Script elegir **Implementar → Nueva implementación**.
-2. Seleccionar tipo **Aplicación web**.
-3. Descripción: `UFIJ22 v1 — demostración` o `UFIJ22 v1 — producción` según la base.
-4. **Ejecutar como:** usuario que accede a la aplicación web.
-5. **Quién tiene acceso:** la opción institucional disponible según lo indicado arriba. No desplegar como acceso anónimo.
-6. Pulsar **Implementar**, completar las autorizaciones y copiar la URL que termina en **`/exec`**.
-7. Compartir esa misma URL con el equipo. No compartir la URL `/dev`, que es para pruebas de editores.
-8. Cada integrante abre la URL con su cuenta autorizada, concede los permisos y selecciona su nombre una sola vez por sesión.
+Además de las opciones originales de Cámaras, se registra:
 
-La Web App depende de la conectividad con Google Apps Script y Google Sheets. No realiza peticiones a otros proveedores ni funciona como aplicación sin conexión.
+- No consta solicitud de preservación.
+- Preservación solicitada, sin confirmación.
+- Preservación confirmada.
+- Videofilmaciones recibidas.
 
-## 6. Uso cotidiano
+Solicitar la remisión no acredita preservación. El estado de recepción de Cámaras y Videofilmaciones recibidas deben coincidir; el formulario los vincula al registrar la recepción.
 
-### Nueva causa y primer despacho
+Para Tránsito y Otros, la referencia se calcula desde **la fecha del hecho + 30 días**, configurable. A 10 días del límite hay advertencia preventiva y a 5 días hay alerta crítica. Si el plazo ya pasó, se informa **referencia superada**, sin presumir que las imágenes fueron destruidas. El control se presenta al cargar el triaje y en la base ya cargada; no hay vigilancia previa a la recepción del sumario.
 
-1. Pulsar **NUEVA CAUSA**.
-2. Cargar IPP, fechas con calendario, instructora, resultado e investigación.
-3. Completar la plantilla. Se abren los campos condicionales de cámaras, testigos, defunción y allanamiento. En Otros elegir prueba principal; en Mala praxis no se calcula potencial.
-4. Pulsar **REVISAR MEDIDAS Y PROPUESTA**.
-5. Revisar el potencial, cuando corresponde, y aceptar o desmarcar sugerencias. Agregar medidas manuales con organismo, fecha, plazo y marca de principal.
-6. Revisar y, si se desea, editar la propuesta textual. Pulsar **Copiar texto** y pegarla en SIMP.
-7. Pulsar **CONFIRMAR DESPACHO Y ACTIVAR SEGUIMIENTO** una sola vez. Allí se crean la causa, las medidas seleccionadas y las tareas internas, se calculan alertas y se registran movimientos en bitácora.
+Confirmar preservación elimina el riesgo de borrado del semáforo y mantiene **recepción pendiente**. La remisión se sigue como medida ordinaria separada. Recibir esa medida actualiza la recepción de cámaras; si no se conoce su utilidad, queda como mecánica no determinada hasta que se revise. La ficha propone el acta de apertura sin crearla automáticamente.
 
-Antes de la confirmación no hay escritura de la causa ni de las sugerencias. Si se modifica un campo del formulario, se requiere revisar nuevamente. La IPP es única y evita duplicar una confirmación repetida.
+La referencia es una herramienta de control: verificar disponibilidad y las condiciones concretas del resguardo. También se muestra cuando aún no se localizaron cámaras, para orientar la averiguación y preservación oportuna; no acredita por sí sola su existencia.
 
-El texto del despacho solo existe en el textarea de la página. No se envía al servidor, no se guarda en Sheets, bitácora, propiedades ni `sessionStorage`. Al salir de la carga se elimina del DOM. El despacho definitivo debe conservarse en SIMP. Confirmar no copia automáticamente el texto: copiarlo antes.
+## Mala praxis y evaluación final
 
-### Tablero y medidas
+No se calcula potencial investigativo en Mala praxis. El circuito conserva: reunir documentación → verificar suficiencia → solicitar fecha → fecha otorgada → designar → pericia realizada → controlar dictamen médico principal → evaluación.
 
-- Los indicadores, filtros y buscador se aplican sobre la base común. El buscador acepta fragmentos de IPP, sin distinguir mayúsculas.
-- Las tarjetas son accesos rápidos a los filtros.
-- **Reiterada** y **Recibida** funcionan desde el tablero y la ficha, con calendario para registrar la fecha de la gestión.
-- Cada reiteración fija una nueva segunda alerta a cinco días de esa fecha, o al plazo configurado. Una gestión anterior a la última se rechaza.
-- La recepción de una solicitud de fecha de pericia pide también la fecha otorgada para la pericia.
-- **Cambiar estado** permite los seis estados de medida. Recibida, No corresponde y Dejada sin efecto eliminan sus alertas.
-- Cualquier integrante autorizada puede registrar la recepción; no está restringida a la instructora responsable.
-- La ficha permite agregar medidas y tareas. Las audiencias guardan fecha mediante calendario; las actas de apertura solo requieren Pendiente/Cumplida.
+El servidor impide pedir la pericia médica sin documentación suficiente, incluso mediante una medida manual de esa categoría. Historia ya secuestrada requiere confirmar que está completa. En lesiones, Autopsia y Anatomía patológica se muestran mediante la opción de supuesto excepcional; en homicidios están en la plantilla. Los antecedentes legados relevantes continúan disponibles al editar.
 
-La edición de la causa actualiza sus datos y deja constancia en bitácora. Mantiene las medidas ya confirmadas, que representan lo efectivamente ordenado. Para nuevos pedidos usar AGREGAR MEDIDA. El tipo de investigación queda fijo después de confirmar para preservar la coherencia del flujo. Una corrección de tipo requiere recrear la carga correcta y eliminar la errónea con confirmación explícita.
+La evaluación se activa únicamente cuando:
 
-### Pericias
+- Tránsito: se recibió el dictamen accidentológico principal.
+- Mala praxis: se recibió el dictamen médico principal.
+- Otros: se recibió la prueba principal pertinente.
+- En cualquiera de los tres tipos: no hay otras medidas principales o necesarias pendientes.
 
-Tránsito: solicitud de fecha → fecha otorgada → designación → pericia realizada / dictamen pendiente → dictamen recibido. El dictamen se crea como medida principal con su plazo a partir de la realización de la pericia. La fecha de solicitud inicial puede revisarse en la medida.
+Una ampliación o un especialista recibido antes del dictamen médico principal **no** habilita la evaluación. Seleccionar Pendiente en una complementaria médica propone su solicitud; no crea el requerimiento. Si se declara necesaria y todavía no se ordenó, también impide considerar madura la causa.
 
-Mala praxis: reunir documentación → marcar **documentación reunida y completa** en Editar causa → solicitar fecha → fecha otorgada → designar → realizada / dictamen pendiente → recibido. El servidor verifica que no queden estados documentales pendientes. Si está **Ya secuestrada**, esa confirmación también implica que se verificó que la historia esté completa. Los cambios de estado de los documentos se realizan en Editar causa; recibir una medida no supone automáticamente que la documentación llegó completa.
+Si la evaluación ya estaba activa y se dispone una complementaria necesaria, se suspende su alerta, manteniendo la tarea y la prueba pendiente visibles. Al recibir todos los informes necesarios se reactiva **la misma tarea**, con ingreso actualizado y un nuevo plazo de 15 días corridos. Se conserva la fecha de creación inicial y las transiciones en bitácora. Se pueden pedir varias ampliaciones o especialistas; cada uno tiene su propia fila y la recepción de uno no cierra los restantes.
 
-En Mala praxis, pasar Ampliación o Especialista a Pendiente/Solicitada desde la edición crea el seguimiento correspondiente si falta. La recepción de esas medidas actualiza su campo. No se puede cerrar la evaluación mientras haya prueba principal o ampliaciones pendientes, ni sin dictamen médico recibido. Si se vuelve a necesitar otra ampliación después de una recibida, agregar una nueva medida principal personalizada.
+Las recepciones de medidas confirmadas se registran en su fila con **Recibida**. Cambiar un dato de la plantilla no constituye recepción ni deja sin efecto una medida anterior.
 
-Otros: la prueba seleccionada se sugiere como medida principal; se puede desmarcar o agregar otra medida principal manual. No impone una pericia fija.
+La vista **CAUSAS PENDIENTES DE EVALUACIÓN 308 / DESESTIMACIÓN** muestra IPP, instructora, ingreso a evaluación, días transcurridos y alerta interna. Permite abrir ficha, registrar control o marcar evaluación cumplida. Se distingue visualmente de los requerimientos probatorios vencidos.
 
-### Evaluación 308 / Desestimación
+Primera alerta: día 15. Segunda: día 20, salvo una gestión que reprograme el siguiente control a cinco días de esa gestión. Permanece vencida hasta cumplir la evaluación. No se permite cerrarla con prueba necesaria pendiente. Cerrar toda la causa exige además resolver medidas, tareas y ORAC. En Mala praxis no puede omitirse el dictamen médico principal.
 
-Al recibir una medida marcada como principal, se crea automáticamente una tarea pendiente y la causa pasa a **Evaluación 308 / Desestimación**. No duplica una evaluación ya pendiente.
+## Testigos, tareas y ORAC
 
-- Primera alerta: 15 días corridos desde la fecha de recepción registrada.
-- Segunda alerta automática: 5 días corridos después de la primera, incluso si no hubo gestión.
-- **Registrar control** reprograma la segunda alerta a 5 días de esa gestión.
-- Permanece vencida hasta cerrar la tarea.
-- Cerrar evaluación pide elegir En seguimiento o Cerrada. Para cerrar toda la causa no debe haber medidas, tareas ni ORAC pendientes. En seguimiento permite nuevas medidas.
+En Tránsito y Otros se puede indicar que existen testigos sin cargar datos personales en el primer despacho. El sistema distingue existencia, individualización, audiencia designada y declaración recibida. Propone individualización si faltan datos y audiencia al disponer de nombre. Cada testigo tiene un identificador estable; corregir un dato no genera otra audiencia por sí solo. Se puede fijar fecha con calendario y hora opcional, y marcar recibida la declaración cumpliendo su tarea.
 
-El indicador azul se refiere a una evaluación pendiente originada por recepción de prueba principal. Las alertas de la tarea muestran su vencimiento por separado.
+Las actas de apertura siguen requiriendo únicamente Pendiente/Cumplida. Las tareas personalizadas y audiencias manuales continúan disponibles.
 
-### ORAC
+ORAC conserva el circuito exclusivo de Tránsito con potencial Identificado, posterior al triaje inicial y por decisión manual con consentimiento confirmado. Estados Remitida / En trámite / Devuelta; primer control a 30 días, segundo a 5 días desde la gestión/reiteración. Permanece visible hasta devolución. No suspende automáticamente otros requerimientos.
 
-No aparece como sugerencia del triaje inicial. En una ficha de Tránsito con potencial Identificado se habilita **Remitir a ORAC**. Se exige confirmar consentimiento de la/s víctima/s y fecha de remisión.
+## Despacho editable y sin almacenamiento
 
-Primera alerta: 30 días desde remisión. Segunda: 5 días desde la gestión/reiteración registrada. Estados: Remitida, En trámite, Devuelta. La causa permanece visible y en el filtro ORAC pendiente hasta registrar devolución. La remisión a ORAC no suspende automáticamente los plazos de otras medidas.
+`Despacho.html` contiene `MODULOS_DESPACHO`, con párrafos independientes para testimoniales, RML, CRIP, cámaras, preservación, historia clínica, pericias e inspecciones/documentación técnica. Solo se incluyen y enumeran las diligencias seleccionadas; se mantienen medidas personalizadas.
 
-### Edición y eliminación
+La mención del art. 232 CPPBA se utiliza en el módulo testimonial solicitado. No se agregaron otros artículos ni fundamentos jurídicos supuestos. Ajustar los módulos permite una revisión jurídica posterior sin cambiar la persistencia.
 
-Los cambios relevantes guardan usuaria, fecha/hora de Buenos Aires, causa, IPP y referencia de medida/tarea, cuando corresponde.
+Se genera localmente, se puede editar y copiar a SIMP tanto en el primer despacho como al confirmar diligencias posteriores. El texto no se envía a la API ni se guarda en Sheets, bitácora, propiedades, `localStorage` o `sessionStorage`. No es una decisión automática y debe ser revisado por la instructora y la Fiscal antes de incorporarlo a SIMP.
 
-Eliminar exige abrir un diálogo con el aviso solicitado y escribir la IPP. El servidor verifica además la versión vigente. Borra causa, medidas, tareas y bitácora asociada. La acción de eliminación se registra en el snapshot antes de borrar; como se pidió eliminar también la bitácora, **no queda un registro residual de esa eliminación en la base**. Las copias de seguridad e historial de Google son independientes de ese borrado.
+## Configuración de plazos
 
-## 7. Plazos y alertas
+Editar solamente **`dias`** en `CONFIGURACION`, manteniendo claves y encabezados. Valores enteros de 0 a 3650. Todos los plazos se cuentan en días corridos; solicitud día cero, sin omitir fines de semana ni feriados.
 
-Editar únicamente la columna **`dias`** en `CONFIGURACION`. Mantener claves y encabezados. Los valores deben ser enteros de 0 a 3650.
+| Clave | Días iniciales | Referencia |
+|---|---:|---|
+| RML | 10 | Solicitud |
+| CRIP | 15 | Solicitud |
+| INFORME_TRANSITO | 15 | Solicitud |
+| FECHA_ACCIDENTOLOGICA | 10 | Solicitud |
+| DICTAMEN_ACCIDENTOLOGICO | 20 | Realización / solicitud del dictamen |
+| HISTORIA_CLINICA | 10 | Solicitud |
+| FECHA_MEDICA | 15 | Solicitud |
+| DICTAMEN_MEDICO | 30 | Realización / solicitud del dictamen |
+| AMPLIACION_MEDICA | 30 | Solicitud complementaria |
+| ESPECIALISTA | 30 | Solicitud complementaria |
+| ORAC | 30 | Remisión |
+| EVALUACION | 15 | Ingreso efectivo o reactivación |
+| SEGUNDA_ALERTA | 5 | Reiteración / control; evaluación sin gestión: primera alerta |
+| CAMARAS_CONSERVACION | 30 | Fecha del hecho |
+| CAMARAS_PREVENTIVA_1 | 10 | Anticipación al límite de conservación |
+| CAMARAS_PREVENTIVA_2 | 5 | Anticipación crítica al mismo límite |
+| GENERAL | 15 | Medidas sin plazo específico |
+| PROXIMA | 3 | Anticipación visual ordinaria |
 
-| Clave | Días iniciales |
-|---|---:|
-| RML | 10 |
-| CRIP | 15 |
-| INFORME_TRANSITO | 15 |
-| FECHA_ACCIDENTOLOGICA | 10 |
-| DICTAMEN_ACCIDENTOLOGICO | 20 |
-| HISTORIA_CLINICA | 10 |
-| FECHA_MEDICA | 15 |
-| DICTAMEN_MEDICO | 30 |
-| ORAC | 30 |
-| EVALUACION | 15 |
-| SEGUNDA_ALERTA | 5 |
-| GENERAL | 15 |
-| PROXIMA | 3 |
+La primera anticipación de cámaras debe ser mayor o igual a la segunda y no superar el plazo de conservación. Los cambios de plazos ordinarios rigen nuevas solicitudes y nuevas gestiones; no cambian vencimientos históricos. Los controles de conservación se recalculan con la referencia configurada sobre la fecha del hecho.
 
-`GENERAL` cubre medidas sin un plazo específico. `PROXIMA` es la anticipación visual para el amarillo. Las medidas manuales admiten plazo propio.
+Semáforos ordinarios: naranja el día exacto de primera alerta, rojo desde el día siguiente o desde la segunda alerta inclusive, amarillo próximos a vencer, verde dentro de plazo, azul para evaluación/prueba recibida. Una reiteración reinicia el segundo control desde su fecha efectiva. Recibida, No corresponde y Dejada sin efecto eliminan la alerta de la medida. Una evaluación suspendida no muestra alertas de decisión final.
 
-Los cambios se leen en cada operación sin redeplegar. Se aplican a **nuevas solicitudes y nuevas reiteraciones**; no recalculan silenciosamente las fechas históricas de medidas ya activadas. Si se cambia SEGUNDA_ALERTA, las nuevas gestiones usarán el nuevo valor en lugar de cinco.
+Las alertas se calculan al consultar. El tablero se actualiza cada 60 segundos cuando no hay un formulario o diálogo activo. No requiere activadores y no envía correos ni notificaciones fuera de la aplicación. Una ficha puede reabrirse para consultar cambios de otras integrantes.
 
-Todos los plazos son días corridos. Se guarda `AAAA-MM-DD` como texto para impedir conversiones regionales; las sumas usan componentes UTC y el día actual se obtiene en Buenos Aires. No se omiten feriados ni fines de semana. El día de solicitud es día cero: solicitud el 01/11 + 10 días vence el 11/11.
+## Concurrencia, rendimiento y bitácora
 
-Semáforos:
+- La Sheet sigue siendo la única base común. Se requiere un solo proyecto Apps Script por base.
+- Todas las consultas/escrituras de la API pasan por `ScriptLock`, con espera de hasta 30 segundos, y las filas conservan control de versión.
+- La API no lee la bitácora completa para abrir el tablero ni para operaciones ordinarias. Desde la ficha se consulta por páginas de 100, con búsqueda desde los movimientos más recientes.
+- Las modificaciones ordinarias escriben solo filas cambiadas o nuevas. La bitácora se agrega al final. Las eliminaciones explícitas compactan las tablas afectadas.
+- Los filtros usan índices en memoria por causa, sin recorrer todas las medidas por cada causa. El tablero pagina causas, medidas y evaluaciones de a 100, con indicadores calculados sobre todos los resultados filtrados.
+- No se cachean causas compartidas entre peticiones, evitando datos obsoletos al escribir. Se releen bajo bloqueo.
+- Ante errores ordinarios se intenta restauración compensatoria. Sheets no ofrece transacciones entre hojas; una interrupción abrupta del runtime todavía puede requerir restaurar una copia de seguridad.
+- Las ediciones manuales en Sheets no adquieren el bloqueo. Trabajar desde la Web App; reservar la Sheet para administración y configuración durante una ventana sin operaciones.
 
-- Rojo: día posterior al primer vencimiento sin gestión; segunda alerta desde su fecha inclusive; evaluación vencida.
-- Naranja: día exacto de primera alerta, requiere reiteración.
-- Amarillo: dentro de los próximos tres días, configurable.
-- Verde: dentro de plazo o reiterada a la espera del segundo control.
-- Azul: prueba principal recibida con evaluación pendiente.
+La prueba ficticia local incluyó 900 causas, 7.200 medidas y 10.800 movimientos. Los resultados y límites están en `VALIDACION.md`; no equivalen a latencia ni cuotas reales de Google. La lectura de causas/medidas sigue siendo completa por consulta; medir en Google si el volumen o la concurrencia crecen.
 
-Las alertas se calculan al consultar, sin modificar la base ni necesitar activadores. El tablero se actualiza cada 60 segundos cuando no hay un formulario o diálogo activo. Una ficha abierta se actualiza al realizar operaciones; puede reabrirse para consultar cambios ajenos. No se envían correos ni notificaciones fuera de la aplicación.
+La bitácora conserva fecha/hora de Buenos Aires, usuaria verificada, causa/IPP, referencia y transición. Los textos se escapan en HTML y se neutralizan prefijos de fórmulas al escribir en Sheets.
 
-## 8. Actualizar una versión
+## Eliminación y respaldo
 
-1. Realizar una copia de seguridad de la Sheet.
-2. Actualizar en el mismo proyecto los archivos que cambiaron y guardar.
-3. Probar con una base de demostración y revisar las ejecuciones.
-4. Ir a **Implementar → Administrar implementaciones → Editar (lápiz)**.
-5. Elegir **Nueva versión**, describir el cambio e implementar.
-6. Conservar la implementación para que la URL `/exec` siga siendo la misma.
-7. Pedir al equipo que recargue la página. Si cambia el manifiesto o los permisos, puede requerirse nueva autorización.
+La eliminación definitiva conserva la confirmación expresa con el aviso original y la escritura de IPP. Usarla únicamente cuando la política institucional de conservación lo permita. El servidor verifica identidad y versión. Elimina causa, medidas, tareas y su bitácora, como en la primera versión; no queda auditoría residual de la causa en la base. Las copias y el historial de Google son independientes.
 
-No ejecutar la carga ficticia sobre producción. Esta versión no incluye migraciones automáticas de esquemas futuros.
+Para respaldo: **Archivo → Hacer una copia**, con fecha y permisos restringidos. También puede nombrarse una versión en **Historial de versiones** y descargarse una copia Excel de las cinco hojas. El Excel no contiene Apps Script: conservar el código por separado. Frecuencia sugerida: diaria durante uso activo y antes de actualizaciones o eliminaciones importantes.
 
-## 9. Copias de seguridad y recuperación
+Recuperación en una copia: vincular el código a esa Sheet, verificar que `SPREADSHEET_ID` no siga apuntando a producción y configurar los correos privados. Si una copia de proyecto conserva el ID anterior, quitarlo solo en ese proyecto de recuperación antes de inicializar la copia. Nunca borrar propiedades de producción para resolver un error de encabezados. Restaurar las cinco hojas si faltan; una migración de una base inicializada no recrea silenciosamente hojas perdidas.
 
-1. Desde la Sheet: **Archivo → Hacer una copia**. Nombrarla con fecha, por ejemplo `UFIJ22 — respaldo — AAAA-MM-DD`.
-2. Guardarla en una carpeta institucional restringida. Comprobar sus permisos de acceso.
-3. También se puede usar **Archivo → Historial de versiones → Nombrar versión actual** antes de un cambio importante.
-4. Para una copia externa, **Archivo → Descargar → Microsoft Excel (.xlsx)** conserva las cinco hojas. Esa descarga no contiene el proyecto Apps Script; conservar también este ZIP y las versiones del código.
-5. Frecuencia sugerida: diaria durante el uso activo y antes de cambios o eliminaciones amplias.
-
-Para recuperar en una Sheet nueva: copiar/restaurar las cinco hojas, vincular el código a esa nueva Sheet y ejecutar inicializar_. Si el proyecto copiado conserva `SPREADSHEET_ID` apuntando a la base anterior, borrar esa propiedad desde Configuración del proyecto antes de inicializar la copia. Revisar también `ALLOWED_EMAILS`, compartir la base y desplegar una nueva URL. Verificar que la copia no apunte a producción antes de probar.
-
-El historial de versiones, la retención de copias y los permisos institucionales se administran en Google Workspace.
-
-## 10. Concurrencia y alcance técnico
-
-- La Sheet es la única base compartida. `sessionStorage` guarda exclusivamente el nombre elegido.
-- Todas las lecturas y escrituras de la API usan un mismo `LockService.getScriptLock()` con espera de hasta 30 segundos. Debe existir **un solo proyecto Apps Script** escribiendo en esa base.
-- Se vuelve a leer el estado bajo el bloqueo, se modifica un snapshot y se guardan únicamente las tablas modificadas.
-- Las filas tienen `version`. Dos ediciones del mismo registro no se pisan: la segunda recibe un aviso de actualización necesaria. Cambios sobre medidas diferentes se conservan ambos.
-- La bitácora se escribe junto con cada modificación.
-- Ante un error ordinario durante una escritura se intenta restaurar las tablas previas. Sheets no tiene transacciones entre hojas: una interrupción abrupta del runtime puede requerir recuperar una copia de seguridad. No se afirma atomicidad transaccional.
-- Ediciones directas de personas sobre la Sheet no adquieren el ScriptLock. Trabajar desde la Web App; reservar las hojas para administración y para cambiar plazos de CONFIGURACION fuera de operaciones activas.
-- El MVP carga las tablas completas y reescribe las modificadas. Está orientado a un equipo pequeño y un volumen inicial moderado; no incluye paginación ni un gestor de archivos de prueba. Si el volumen aumenta, medir cuotas y tiempos antes de ampliarlo.
-- Los textos se escapan al renderizar HTML y se neutralizan prefijos de fórmulas al escribir en Sheets.
-- No hay inteligencia artificial externa ni decisiones automáticas de remisión o cierre. Las sugerencias provienen de reglas explícitas y la instructora confirma las medidas y el despacho.
-
-## 11. Verificación incluida
+## Pruebas y mantenimiento
 
 Con Node.js 18 o superior, sin instalar paquetes:
 
 ```sh
 node pruebas/verificar.cjs
+node pruebas/mejoras.cjs
 ```
 
-La carpeta `pruebas/` usa módulos nativos de Node y adaptadores locales de Google Sheets/ScriptLock. Comprueba reglas, calendario, persistencia, CRUD y dos escrituras concurrentes en workers. No sustituye una prueba con servicios reales de Google. Ver `VALIDACION.md` para lo efectivamente comprobado y la lista de aceptación después del despliegue.
+La primera suite conserva regresiones y escrituras concurrentes; la segunda cubre los escenarios nuevos, migración y volumen. Usan servicios Google simulados y datos exclusivamente ficticios. Ejecutar `pruebasReglas_` y la aceptación de `VALIDACION.md` después de instalar en Google. No se afirma que se haya probado allí.
+
+Para regenerar el instalador con los archivos actuales, usar Python 3 y su biblioteca estándar:
+
+```sh
+python3 herramientas/generar_instalador.py
+```
+
+Las funciones de administración terminadas en `_` son privadas para `google.script.run` y se ejecutan desde el editor. Las futuras extensiones deben mantener validación de identidad, bloqueo, versiones, confirmación de nuevas medidas y ausencia de persistencia del despacho.

@@ -1,12 +1,42 @@
 <script>
-/* Generador exclusivo del navegador. Este texto nunca se transmite a la API. */
+/* Módulos jurídicos locales. Ajustar aquí la redacción sin alterar las reglas ni guardar el texto. */
+const MODULOS_DESPACHO = {
+ RML:(m)=>'Requiérase al '+m.organismo+' la realización del reconocimiento médico legal de la víctima o, si ya hubiera sido practicado, la remisión del informe correspondiente y sus constancias.',
+ CRIP:(m)=>'Requiérase a '+m.organismo+' la remisión del CRIP y de las actuaciones, relevamientos y registros producidos con motivo de su intervención en el hecho investigado.',
+ HISTORIA_CLINICA:(m)=>'Requiérase a '+m.organismo+' la remisión de la historia clínica completa de la víctima, con sus anexos, estudios, registros de atención, indicaciones y demás documentación médica vinculada con la asistencia investigada.',
+ PRESERVAR_CAMARAS:(m,c)=>'Requiérase con carácter urgente a '+m.organismo+' la preservación de las videofilmaciones que pudieran registrar el hecho del '+fmt(c.fechaHecho)+', así como la confirmación expresa de su efectivo resguardo. Solicítese que se informe su disponibilidad y el plazo de conservación aplicable, a fin de prevenir la pérdida de registros.',
+ CAMARAS:(m,c)=>'Requiérase a '+m.organismo+' la remisión de las videofilmaciones vinculadas con el hecho del '+fmt(c.fechaHecho)+', con identificación de su origen, ubicación de las cámaras y período registrado. La remisión se gestionará independientemente de la confirmación de preservación.',
+ 'Acta de apertura':()=>'Procédase a la apertura, visualización y descripción de las videofilmaciones incorporadas, labrándose acta en la que se deje constancia de los archivos examinados, su identificación y el contenido relevante para la investigación.',
+ 'Audiencia testimonial':m=>'Desígnese audiencia para recibir declaración testimonial '+(m.testigoNombre?'a '+m.testigoNombre:'a la persona indicada en la diligencia: '+m.descripcion.replace(/\.$/,''))+' conforme al art. 232 del CPPBA'+(m.fechaAudiencia?', para el día '+fmt(m.fechaAudiencia)+(m.horaAudiencia?' a las '+m.horaAudiencia+' horas':''):'; la fecha y hora se fijarán oportunamente')+'. Practíquese la citación correspondiente con los datos de contacto disponibles.',
+ FECHA_ACCIDENTOLOGICA:m=>'Requiérase a '+m.organismo+' la asignación de fecha para la realización de pericia accidentológica, a fin de examinar los elementos disponibles y establecer, en cuanto resulte técnicamente posible, la mecánica del hecho investigado.',
+ FECHA_MEDICA:m=>'Reunida y verificada la documentación médica necesaria, requiérase a '+m.organismo+' la asignación de fecha para la realización de pericia médica sobre la atención objeto de investigación. Los puntos de pericia serán revisados y establecidos por la Fiscalía.',
+ INFORME_TRANSITO:m=>'Requiérase a '+m.organismo+' un informe sobre las condiciones de circulación y demás antecedentes de tránsito pertinentes al lugar y a la fecha del hecho, acompañando la documentación y registros disponibles.',
+ INSPECCION:m=>'Requiérase a '+m.organismo+' una inspección técnica de las instalaciones, equipos o sector vinculados con el hecho, con relevamiento de las condiciones de seguridad e higiene que resulten pertinentes y documentación de los hallazgos.',
+ DOCUMENTACION_TECNICA:m=>'Requiérase a '+m.organismo+' la documentación técnica y administrativa vinculada con el hecho, incluyendo, cuando corresponda, registros de mantenimiento, controles, habilitaciones y antecedentes de seguridad e higiene.',
+ AMPLIACION_MEDICA:m=>'Requiérase a '+m.organismo+' la ampliación del dictamen médico en los aspectos que la Fiscalía individualice como pendientes de aclaración o insuficientemente desarrollados, acompañando los antecedentes necesarios.',
+ ESPECIALISTA:m=>'Requiérase a '+m.organismo+' la intervención de un profesional de la especialidad pertinente para producir el informe pericial complementario dispuesto, con los puntos y antecedentes que establezca la Fiscalía.',
+ DICTAMEN_MEDICO:m=>'Requiérase a '+m.organismo+' la remisión del dictamen correspondiente a la pericia médica realizada, junto con sus anexos y estudios complementarios.',
+ DICTAMEN_ACCIDENTOLOGICO:m=>'Requiérase a '+m.organismo+' la remisión del dictamen accidentológico correspondiente a la pericia realizada, con sus registros, anexos y conclusiones.',
+ PRINCIPAL_OTROS:(m,c)=>'Requiérase a '+m.organismo+' la producción de la prueba principal identificada como '+c.principalTipo+', con examen de los antecedentes relevantes y documentación de sus resultados.',
+ DEFUNCION:m=>'Requiérase a '+m.organismo+' la remisión del certificado de defunción correspondiente a la víctima.',
+ AUTOPSIA:m=>'Requiérase a '+m.organismo+' la remisión del protocolo de autopsia, sus anexos y estudios complementarios disponibles.',
+ ANATOMIA:m=>'Requiérase a '+m.organismo+' la remisión del informe anatomopatológico y sus constancias complementarias.'
+};
+function parrafoDiligencia_(m,c){
+ if(MODULOS_DESPACHO[m.tipo])return MODULOS_DESPACHO[m.tipo](m,c);
+ const descripcion=String(m.descripcion||'').trim().replace(/[.\s]+$/,'');
+ return descripcion+'.'+(m.clase==='tarea'?'':' A tales fines, líbrese requerimiento a '+m.organismo+'.');
+}
+function textoDespacho_(c,seleccion,fecha){
+ let texto='UFIJ N.º 22 QUILMES\nIPP '+c.ipp+'\n\nQuilmes, '+fmt(fecha)+'.\n\nPor recibido el sumario policial correspondiente a la presente IPP digital, procédase a su incorporación y, a fin de avanzar en el esclarecimiento del hecho investigado, dispónganse las siguientes diligencias:\n\n';
+ texto+=seleccion.map((m,i)=>(i+1)+'. '+parrafoDiligencia_(m,c)).join('\n\n');
+ if(!seleccion.length)texto+='No se han seleccionado diligencias para este proyecto.';
+ return texto;
+}
 function generarDespacho(){
- const c=leerCausa(),seleccion=elegidas().concat(S.manuales),fecha=$('#fechaDespacho').value;
- let texto='UFIJ N.º 22 QUILMES\nIPP '+c.ipp+'\n\nQuilmes, '+fmt(fecha)+'.\n\nPor recibido el sumario policial, fórmese y regístrese la presente investigación por el hecho ocurrido el '+fmt(c.fechaHecho)+', provisoriamente calificado como '+c.resultado.toLowerCase()+'.\n';
- if(c.dato)texto+='\nTéngase presente: '+c.dato+'.\n';
- texto+='\nA fin de avanzar en el esclarecimiento del hecho, dispóngase:\n';
- texto+=seleccion.length?seleccion.map((m,i)=>(i+1)+'. '+m.descripcion+(m.clase==='tarea'?(m.fechaAudiencia?' Audiencia: '+fmt(m.fechaAudiencia)+'.':''):' Líbrese requerimiento a '+m.organismo+'.')).join('\n'):'Sin medidas adicionales seleccionadas en esta propuesta.';
- texto+='\n\nCúmplase y oportunamente vuelvan las actuaciones a despacho.';
- $('#despacho').value=texto;
+ const posterior=S.vista==='ficha';
+ const c=posterior?S.ficha.causa:leerCausa();
+ const seleccion=posterior?$$('[data-nueva]:checked').map(el=>S.ficha.sugerencias[Number(el.dataset.nueva)]):elegidas().concat(S.manuales);
+ $('#despacho').value=textoDespacho_(c,seleccion,$('#fechaDespacho').value);
 }
 </script>

@@ -1,3 +1,5 @@
+REGRESIÓN — SERVICIOS GOOGLE SIMULADOS
+
 ✓ Inicialización idempotente; cinco hojas
 Cruce de año en días corridos
 Año bisiesto
@@ -38,3 +40,31 @@ Mala praxis sin potencial
 ✓ Dos escrituras simultáneas sobre medidas distintas: ambas conservadas
 
 28 pruebas locales aprobadas. ScriptLock y Google Sheets simulados; ejecutar también validación en Google.
+
+MEJORAS Y VOLUMEN — SERVICIOS GOOGLE SIMULADOS
+
+✓ A — cámaras posteriores: reclasificación, propuesta y confirmación sin duplicar
+✓ B — preservación independiente: +30 desde hecho, advertencia y recepción pendiente
+✓ B — referencia superada no supone destrucción; umbrales configurables
+✓ C — no se saltea documentación médica por API o por medida manual
+✓ D — ampliación suspende y reactiva la misma evaluación con nuevo plazo
+✓ E — especialista antes del dictamen original no crea evaluación
+✓ F — 15/20 días, control reprogramable, vencimiento persistente hasta cumplimiento
+✓ G — varios requisitos: recibir solo uno no activa y reabrirlo suspende
+✓ G — edición no altera ni recibe medidas previas; nueva categoría repetida es explícita
+✓ Rol en evaluación de una medida existente: suspensión explícita y versión protegida
+✓ Carga ágil: testigos sin datos, individualización, audiencia y declaración separadas
+✓ H — identidad segura: nombre ajeno, cuenta desconocida, identidad vacía y configuración ausente
+✓ Migración desde v1: aditiva, conserva datos y plazos; repetición no cambia registros
+✓ Migración rechaza encabezado desconocido antes de tocar ninguna hoja
+✓ Migración no recrea una hoja faltante de una base inicializada
+✓ Varias complementarias médicas: solo el último informe pendiente reactiva
+✓ Migración interrumpida: completa valores nuevos faltantes sin tocar datos anteriores
+✓ Migración suspende una evaluación v1 prematura originada por complementaria
+✓ Tránsito: otra medida marcada principal no reemplaza el dictamen accidentológico
+✓ Despacho modular: solo selección, testimonio 232 con fecha/hora y texto personalizado
+✓ I — 900 causas / 7200 medidas / 10800 movimientos: tablero paginado sin leer bitácora completa
+✓ I — escritura puntual conserva registros y evita reescribir tablas
+RENDIMIENTO {"causas":900,"medidas":7200,"movimientos":10800,"tablero_ms":[45.5,34,29.2,28.7,32],"filtro_ms":18.7,"escritura_ms":57.7,"celdas_escritas":52,"entorno":"Node local; servicios Google simulados, sin latencia remota"}
+
+22 pruebas adicionales aprobadas. Ejecutar además verificar.cjs para regresiones y concurrencia.
