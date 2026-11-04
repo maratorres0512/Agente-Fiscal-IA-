@@ -1,0 +1,40 @@
+✓ Inicialización idempotente; cinco hojas
+Cruce de año en días corridos
+Año bisiesto
+Cuenta sábado y domingo
+Segunda alerta cinco días desde reiteración
+Segunda alerta activa
+Recepción elimina alerta
+Tránsito con fuente útil
+Tránsito pendiente
+Otros limitado
+Mala praxis sin potencial
+✓ Reglas en runtime compatible GAS
+✓ Fechas inválidas rechazadas
+✓ Medidas terminales sin alertas
+✓ Datos ficticios: tres plantillas y cinco instructoras
+✓ Cada filtro por instructora devuelve solo sus causas
+✓ Filtros combinados y por IPP, estado, ORAC, evaluación, vencidas y reiteradas
+✓ Acción rápida Reiterada: segunda fecha desde gestión, no desde vencimiento
+✓ Otra reiteración reinicia el segundo control; rechaza gestión anterior
+✓ Acción rápida Recibida apaga la alerta
+✓ Prueba principal de Otros genera evaluación única, 15 + 5 días
+✓ Evaluación persiste vencida luego de segunda alerta y control reprograma cinco días
+✓ Edición, versión optimista y auditoría
+✓ Usuario y operaciones desconocidas rechazados
+✓ Analizar no escribe ni activa seguimiento
+✓ Documentación incompleta bloquea pericia médica
+✓ Flujo médico completo y ampliación no cierra prematuramente evaluación
+✓ Evaluación no permite cerrar toda la causa con otras medidas pendientes
+✓ ORAC: consentimiento, devolución y segunda alerta desde gestión
+✓ No existe campo ni persistencia de despacho; se descarta incluso si lo envían
+✓ Error de escritura ordinario restaura las tablas anteriores
+✓ Lista de acceso de cuentas rechaza correo ajeno y admite autorizado
+✓ Plazos editables sin código; fechas existentes conservadas
+✓ Eliminación exige IPP y elimina todas las asociaciones
+✓ Mala praxis no puede cerrar sin pericia aunque se desmarquen todas las medidas
+✓ Cierre de causa bloqueado con pendientes
+✓ Dos escrituras simultáneas sobre la misma versión: una aceptada, otra en conflicto
+✓ Dos escrituras simultáneas sobre medidas distintas: ambas conservadas
+
+28 pruebas locales aprobadas. ScriptLock y Google Sheets simulados; ejecutar también validación en Google.

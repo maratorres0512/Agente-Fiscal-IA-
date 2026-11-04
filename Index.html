@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><base target="_top"><meta charset="UTF-8"><?!= incluir_('Estilos'); ?></head>
+<body>
+<section id="ingreso" class="ingreso">
+ <div class="presentacion"><div class="sello" aria-hidden="true">22</div><p class="eyebrow">MINISTERIO PÚBLICO · QUILMES</p><h1>Gestión de prueba.<br>Una base compartida.</h1><p>Agente de triaje y gestión de prueba<br>UFIJ N.º 22 Quilmes</p><small>Tránsito · Mala praxis · Otros hechos culposos</small></div>
+ <form id="login" class="login"><p class="eyebrow">ACCESO DEL EQUIPO</p><h2>Bienvenida</h2><p>Seleccioná tu nombre para registrar las gestiones de esta sesión.</p><label>Usuaria<select id="usuaria" required><option value="">Seleccionar usuaria</option><option>Rocío Albarracín</option><option>Laura Sánchez</option><option>Cecilia Attolini</option><option>Andrea Ramat</option><option>Mara Torres</option></select></label><button type="submit" class="primario">INGRESAR AL TABLERO →</button><small>La sesión se conserva en esta pestaña. El acceso a la aplicación se controla con la cuenta Google institucional.</small></form>
+</section>
+<div id="app" hidden>
+ <header class="cabecera"><div class="marca"><span class="mini-sello">22</span><div><strong>UFIJ N.º 22 QUILMES</strong><span>AGENTE DE TRIAJE Y GESTIÓN DE PRUEBA</span></div></div><div class="sesion"><span id="sesionNombre"></span><button data-action="salir" class="texto">Cambiar usuaria</button></div></header>
+ <nav class="barra"><button data-action="tablero" class="texto">Tablero de seguimiento</button><span id="fechaHoy"></span><span class="crece"></span><span id="sync">Base compartida · Google Sheets</span><button data-action="nueva" class="primario">＋ NUEVA CAUSA</button></nav>
+ <main id="contenido"></main>
+ <footer>UFIJ N.º 22 Quilmes · Plazos en días corridos · <span id="actualizado"></span></footer>
+</div>
+<div id="progreso" hidden role="status">Procesando…</div><div id="aviso" role="status" aria-live="polite" hidden></div>
+<dialog id="dialogo"><form id="dialogForm"><div class="seccion-titulo"><h2 id="dialogTitulo"></h2><button type="button" data-action="cerrarDialogo" aria-label="Cerrar">×</button></div><div id="dialogCuerpo"></div><div class="acciones"><button type="button" data-action="cerrarDialogo">Cancelar</button><button type="submit" class="primario" id="dialogConfirmar">Confirmar</button></div></form></dialog>
+<?!= incluir_('Despacho'); ?>
+<?!= incluir_('Cliente'); ?>
+</body></html>
