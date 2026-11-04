@@ -1,68 +1,88 @@
-# Validación de la primera versión
+# Validación — seguimiento activo de UFIJ N.º 22
 
-## Alcance de lo ejecutado
+## Entorno y resultados
 
-Las comprobaciones se hicieron con datos ficticios y el código entregado. No se conectó este entorno a una cuenta de Google Apps Script ni se desplegó una Web App en Google.
+Se modificó el código existente del repositorio. Se utilizaron exclusivamente datos ficticios. **No se instaló ni se ejecutó esta versión en Google Apps Script o Google Sheets reales.**
 
-| Verificación | Resultado |
-|---|---|
-| Sintaxis de todos los `.gs` y scripts HTML | Correcta en V8/Node |
-| Suite local de 28 pruebas | Aprobada |
-| Calendario: fines de semana, cambio de año, bisiestos e inválidas | Aprobado |
-| Segunda alerta de medida desde reiteración + 5 días | Aprobada |
-| Segunda reiteración y rechazo de fecha anterior | Aprobados |
-| Alertas desactivadas en los tres estados terminales | Aprobado |
-| Tres investigaciones y cinco instructoras | Aprobadas |
-| Filtros por IPP, instructora, investigación, resultado, estado, ORAC, evaluación, vencidas y reiteradas | Aprobados |
-| Recepción de prueba principal genera una sola evaluación pendiente | Aprobada |
-| Evaluación: +15 y +5 días, persistencia hasta cierre | Aprobada |
-| Mala praxis: documentación previa, flujo de pericia y ampliación pendiente bloquea cierre | Aprobados |
-| Edición y rechazo de versión desactualizada | Aprobados |
-| Restauración compensatoria ante error ordinario y lista de correos permitidos | Aprobadas con servicios simulados |
-| Eliminación con IPP y eliminación de dependencias | Aprobadas |
-| Dos escrituras simultáneas en el mismo registro | Una aceptada y otra rechazada por versión |
-| Dos escrituras simultáneas sobre medidas distintas | Ambas conservadas |
-| Ausencia de persistencia del despacho, aun si alguien envía un campo extra | Aprobada |
-| Pantalla de ingreso y conservación de sesión al recargar | Aprobadas en Chromium |
-| Altas desde la interfaz con las tres plantillas | Aprobadas en Chromium |
-| Testigos múltiples, medida manual y propuesta editable | Aprobados en Chromium |
-| Acciones rápidas, edición y eliminación desde la interfaz | Aprobadas en Chromium |
-| Pericia médica y generación de evaluación desde la interfaz | Aprobadas en Chromium |
-| Diseño móvil a 390 px y escritorio a 1440 px | Sin desborde global |
-| Errores JavaScript en navegación probada | Ninguno |
-| Dependencias externas en el proyecto desplegable | Ninguna |
-
-La suite local ejecuta las funciones de servidor y repositorio entregadas con un adaptador de Sheets y un bloqueo compartido entre workers Node. Verifica serialización y conservación de datos; no demuestra por sí sola el comportamiento del servicio Google LockService, autorizaciones o cuotas. Las pruebas de interfaz usaron Chromium contra una API local con los mismos servicios de negocio y una simulación de `google.script.run`.
-
-## Repetir pruebas locales
-
-Con Node.js 18 o superior, desde la carpeta del proyecto:
+Comandos ejecutados con Node.js, sin instalar paquetes:
 
 ```sh
 node pruebas/verificar.cjs
+node pruebas/mejoras.cjs
 ```
 
-No se requiere `npm install` ni acceso de red. Se utilizan únicamente módulos nativos. Se crean archivos temporales para las pruebas concurrentes y se eliminan al finalizar.
+Resultado: **28 pruebas de regresión + 22 pruebas adicionales = 50 pruebas locales aprobadas**. La primera suite incluye las comprobaciones de calendario de `pruebasReglas_` ejecutadas en el adaptador local.
 
-## Aceptación después de desplegar en Google
+| Escenario solicitado | Comprobación ejecutada | Resultado local |
+|---|---|---|
+| A — Tránsito con cámaras posteriores | Limitado → Identificado; acta, Informe de Tránsito y fecha accidentológica propuestos; edición sin crear pedidos; confirmación y rechazo de versión vieja | Aprobado |
+| B — Riesgo de cámaras | Fecha del hecho + conservación; alerta crítica; confirmación de preservación elimina riesgo y conserva remisión pendiente; recepción y acta; referencia superada sin presumir destrucción; cambio de umbrales | Aprobado |
+| C — Documentación médica incompleta | Se bloquean flujo y solicitud manual de fecha médica; al completarla se propone y solo al confirmar se solicita | Aprobado |
+| D — Ampliación médica | Suspende evaluación; impide cierre; reusa misma tarea y reinicia 15/20 al recibir; permite segunda ampliación sin alterar la primera | Aprobado |
+| E — Especialista | Recibir especialista antes del dictamen médico no crea evaluación; varias complementarias pendientes requieren todas las recepciones | Aprobado |
+| F — Evaluación | Primera a 15 días, segunda a 20, control +5, vencimiento persistente, cumplimiento y edición posterior sin reapertura indebida | Aprobado |
+| G — Nuevas diligencias | Propuesta posterior sin duplicaciones; recepción desde filas; solicitudes explícitas de misma categoría conservan historial; varias medidas necesarias bloquean activación prematura | Aprobado |
+| H — Identidad | Cuenta ajena, otro nombre, identidad vacía, configuración ausente/inválida y cuenta duplicada rechazadas | Aprobado |
+| I — Volumen | 900 causas, 7.200 medidas y 10.800 movimientos; consultas, filtros, paginación y escritura puntual | Aprobado con adaptador local |
+| J — Regresiones | Tres plantillas, ORAC, calendario, alertas, filtros, edición, eliminación, bitácora, despacho sin persistencia, restauración ante error ordinario y concurrencia | Aprobado |
+| Migración | V1 a columnas nuevas, valores configurados conservados, repetición idempotente, interrupción tras encabezados, rechazo de cabeceras ajenas y hojas faltantes | Aprobado |
+| Madurez legada | Evaluación v1 prematura suspendida; un informe auxiliar no sustituye al dictamen accidentológico | Aprobado |
+| Carga ágil | Testigos sin datos; identificación, fecha/hora y declaración recibida separadas | Aprobado |
+| Despacho modular | Solo medidas seleccionadas, enumeración, testimonial art. 232 con fecha/hora, medida personalizada y sin artículos agregados | Aprobado |
 
-Usar exclusivamente una Sheet de demostración con `datosFicticios_` y dos cuentas autorizadas, o dos pestañas para la comprobación de bloqueo.
+Las pruebas concurrentes utilizan dos workers que ejecutan API, servicios y repositorio reales del proyecto con una Sheet y un bloqueo simulados compartidos. Sobre la misma versión, una modificación se acepta y la otra se rechaza; sobre medidas distintas se conservan ambas escrituras. Esto verifica la lógica local, no la infraestructura Google LockService.
 
-1. Ejecutar `pruebasReglas_` en el editor. Comprobar sus 10 resultados en el registro.
-2. Abrir `/exec` con cada cuenta del equipo. Verificar permiso sobre la Sheet y autorizar el proyecto.
-3. Seleccionar usuaria. Recargar: no debe pedir nuevamente el nombre. Cambiar usuaria y verificar que las nuevas acciones se atribuyan al nombre elegido.
-4. Aplicar cada instructora al filtro. Debe mostrarse su causa ficticia y solo sus medidas.
-5. Crear una causa de Tránsito con cámaras recibidas útiles, Policía Científica y un testigo. Revisar sugerencias, quitar una, agregar una manual. Antes de confirmar, comprobar que la Sheet no tiene esa IPP. Confirmar y verificar las medidas aceptadas y tareas. Buscar el texto del despacho en las cinco hojas: no debe existir.
-6. Desde el tablero, marcar una medida Reiterada con fecha de hoy. Verificar `segundaAlerta = fechaReiteracion + 5`. Marcarla Recibida: debe desaparecer la alerta y registrarse la usuaria.
-7. En Tránsito registrar fecha otorgada, designar, registrar pericia realizada y recibir el dictamen. Debe crearse la tarea de evaluación con primera alerta a 15 días de recepción y segunda a 20, sin duplicarse por recibir nuevamente la misma medida.
-8. Crear Mala praxis con documentación incompleta: no debe sugerir fecha de pericia médica. Reunir y actualizar documentación, confirmar documentación completa, solicitar fecha y completar el flujo. Recibir dictamen y marcar una ampliación Pendiente: la evaluación no debe poder cerrarse hasta resolver esa ampliación.
-9. Crear Otros con una prueba principal personalizada. Recibirla: debe generar evaluación con la misma lógica.
-10. En una causa de Tránsito con potencial Identificado, remitir a ORAC confirmando consentimiento. Comprobar control a 30 días y persistencia hasta devolución. Registrar gestión: segundo control a 5 días. Registrar devolución: debe salir del filtro ORAC pendiente.
-11. Editar un dato y comprobar la bitácora. Abrir la misma ficha en dos pestañas y editar en ambas: tras guardar la primera, la segunda debe pedir actualizar, sin pisar el cambio.
-12. En una ficha `FICTICIA-`, abrir **Validación con datos ficticios** y pulsar **Probar concurrencia real en Apps Script**. El navegador envía dos solicitudes simultáneas con la misma versión. Debe informar una aceptada y una rechazada por versión desactualizada. Queda una tarea `PRUEBA CONCURRENCIA` en la ficha y su movimiento en bitácora.
-13. En dos pestañas, marcar recibidas dos medidas diferentes casi simultáneamente. Reabrir ficha y verificar ambas recepciones y movimientos. Si ambas seleccionaron la misma medida, la segunda debe avisar conflicto de versión.
-14. Intentar eliminar: cancelar primero y comprobar que todo sigue presente. Repetir, escribir IPP incorrecta y comprobar rechazo. Escribir IPP correcta: no deben quedar causa, medidas, tareas ni bitácora asociada.
-15. Cambiar RML de 10 a 8 en CONFIGURACION. Crear otra causa de prueba y verificar el nuevo plazo. El vencimiento histórico no debe cambiar. Restablecer 10 al terminar.
-16. Abrir la URL desde una cuenta no permitida: no debe obtener datos de la API. Revisar la configuración del dominio y `ALLOWED_EMAILS` si el resultado difiere.
+## Medición ficticia de rendimiento
 
-Estas verificaciones reales quedan pendientes de la instalación por la persona administradora. El proyecto incluye el código y los controles necesarios para realizarlas; no se afirma que ya se hayan ejecutado en Google.
+Una ejecución de `pruebas/mejoras.cjs` produjo:
+
+| Operación | Resultado |
+|---|---:|
+| Causas / medidas / movimientos | 900 / 7.200 / 10.800 |
+| Cinco consultas de tablero | 45,5 / 34 / 29,2 / 28,7 / 32 ms |
+| Filtro por instructora | 18,7 ms |
+| Escritura de una reiteración | 57,7 ms |
+| Celdas escritas en esa gestión | 52: causa + medida + bitácora |
+| Tamaño de página | 100 registros |
+
+Se comprueba que la consulta no lea los registros de bitácora: solo verifica su encabezado. Las escrituras no reescriben miles de filas y conservan los 7.200 pedidos y el movimiento agregado.
+
+Los tiempos son de Node y memoria local. **No incluyen latencia de SpreadsheetApp, autenticación, transferencia de datos, cuotas, tiempo de espera de LockService ni renderizado remoto de Google.** Deben medirse nuevamente en una copia de prueba de Apps Script antes de inferir capacidad productiva.
+
+## Interfaz verificada en Chromium
+
+Se ejecutaron dos recorridos automatizados contra un servidor local que utiliza las mismas funciones de negocio, con un puente simulado de `google.script.run`:
+
+- Ingreso y conservación de sesión, filtro por instructora, tres altas, testigos múltiples, medidas manuales, despacho editable y ausencia de su texto en la base.
+- Reiteración y recepción, edición, pericia médica completa, evaluación generada, eliminación con IPP y vista móvil a 390 px.
+- Rechazo de selección de otro nombre frente a la cuenta del adaptador; controles y cumplimiento de evaluación desde el tablero.
+- Edición posterior con cámaras útiles, propuesta nueva, desmarcado de Informe de Tránsito, confirmación de acta y fecha de pericia sin pedidos no seleccionados ni duplicados.
+- Proyecto modular posterior, botón de rol probatorio, consulta paginada de bitácora, carga sin nombre de testigos y aparición contextual de autopsia/anatomía patológica.
+
+Sin errores JavaScript durante los recorridos y sin desborde global en móvil. El proyecto desplegable usa solo HTML, CSS y JavaScript nativos. El navegador de verificación es herramienta de desarrollo del entorno y no una dependencia de la aplicación.
+
+## Qué falta validar en Google
+
+Pendiente: permisos reales de Workspace, identificación con la modalidad institucional, migración sobre una copia de la base existente, disponibilidad del calendario/portapapeles en los navegadores institucionales, latencias/cuotas y bloqueos reales. No se enviaron mensajes ni se accedió a causas reales.
+
+### Aceptación en una copia de demostración
+
+1. Respaldar y copiar la base; comprobar que `SPREADSHEET_ID` apunte a la copia y nunca a producción. Instalar el código actualizado allí.
+2. Configurar `USUARIAS_EMAILS` con las cuentas del equipo en propiedades privadas. Ejecutar `migrar_`, verificar columnas y valores conservados, repetir y comprobar que no se dupliquen registros. No ejecutar `datosFicticios_` si la copia contiene registros existentes.
+3. En una base separada completamente vacía puede ejecutarse `datosFicticios_`. Ejecutar también `pruebasReglas_` desde el editor: debe devolver 10 verificaciones aprobadas en el runtime real.
+4. Implementar `/exec` como usuaria que accede. Abrir con cada cuenta, elegir el nombre correspondiente y autorizar. Seleccionar otro nombre: debe rechazarse. Verificar también cuenta ajena y una configuración de despliegue sin identidad: debe fallar de forma segura, sin obtener causas.
+5. Crear Tránsito sin cámaras útiles; editar después a Recibidas/Muestran. Verificar reclasificación, propuestas, que la Sheet todavía no tenga los nuevos pedidos, desmarcar uno y confirmar los restantes. Editar otra vez: no deben duplicarse las ya confirmadas.
+6. Cargar un hecho de hace 29 días sin preservación confirmada. Comprobar alerta crítica basada en el hecho. Confirmar preservación: debe cesar el riesgo, con recepción aún pendiente. Recibir las imágenes y revisar el acta propuesta. Para un hecho de hace más de 30 días, comprobar el texto de referencia superada.
+7. En Mala praxis incompleta, intentar solicitar fecha: debe impedirlo. Completar antecedentes y confirmación de suficiencia; revisar y confirmar fecha. Registrar fecha otorgada, designación, realización y recepción del dictamen.
+8. Con evaluación activa, declarar ampliación Pendiente y confirmar el requerimiento. Debe suspenderse la alerta. Recibir ampliación y comprobar mismo ID de tarea con nuevo ingreso y +15/+20. Repetir con dos complementarias; recibir solo una no debe reactivar. Solicitar una segunda ampliación de igual categoría con descripción distinta y conservar la primera.
+9. En otra causa médica, recibir un especialista antes del dictamen original: no debe haber evaluación activa. En Tránsito, una medida auxiliar marcada principal tampoco reemplaza el dictamen accidentológico.
+10. En Otros, marcar dos pruebas como necesarias. Recibir una sola: no evaluar. Recibir la restante: activar evaluación. Reabrir una necesaria: suspender. No permitir cierre mientras falte prueba.
+11. Usar el filtro/vista de evaluación. Comprobar responsable, ingreso, días y semáforo; registrar control y verificar siguiente fecha a cinco días; marcar cumplida. Una causa con otras medidas puede seguir En seguimiento, pero no cerrarse por completo.
+12. Probar testigos sin datos en alta; individualizar después, confirmar audiencia, fijar fecha con calendario y hora opcional, cumplir declaración. En lesiones médicas, mostrar estudios excepcionales; en homicidio comprobar visibilidad contextual.
+13. Generar despacho con solo dos medidas y otra personalizada. Verificar numeración y redacción; editar/copiar. Buscar su texto en las cinco hojas y propiedades: no debe estar. Revisar el módulo jurídico con la instructora y la Fiscal.
+14. Probar Reiterada y Recibida desde tablero y ficha; segunda alerta = reiteración + 5. Verificar tres estados terminales sin alertas. Probar ORAC a 30 días, gestión +5 y devolución.
+15. Abrir la misma ficha en dos pestañas, editar ambas y guardar: la desactualizada debe rechazarse. En una ficha FICTICIA, usar **Validación con datos ficticios → Probar concurrencia real en Apps Script**. Esperar una operación aceptada y la otra rechazada por versión. Luego modificar dos medidas distintas simultáneamente y comprobar ambas recepciones y bitácora.
+16. Probar eliminación cancelada, IPP errónea y confirmación correcta, únicamente con datos ficticios y conforme la política de conservación. Comprobar eliminación de todas las dependencias, sin afectar otras causas.
+17. En una base ficticia de volumen equivalente, medir tiempos desde los navegadores institucionales, consumo de ejecuciones, paginación y escritura. Revisar errores/cuotas antes de habilitar la versión productiva.
+
+Documentar los resultados de estos pasos después de ejecutarlos; permanecen pendientes de la instalación institucional.
