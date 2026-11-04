@@ -1,0 +1,12 @@
+<script>
+/* Generador exclusivo del navegador. Este texto nunca se transmite a la API. */
+function generarDespacho(){
+ const c=leerCausa(),seleccion=elegidas().concat(S.manuales),fecha=$('#fechaDespacho').value;
+ let texto='UFIJ N.º 22 QUILMES\nIPP '+c.ipp+'\n\nQuilmes, '+fmt(fecha)+'.\n\nPor recibido el sumario policial, fórmese y regístrese la presente investigación por el hecho ocurrido el '+fmt(c.fechaHecho)+', provisoriamente calificado como '+c.resultado.toLowerCase()+'.\n';
+ if(c.dato)texto+='\nTéngase presente: '+c.dato+'.\n';
+ texto+='\nA fin de avanzar en el esclarecimiento del hecho, dispóngase:\n';
+ texto+=seleccion.length?seleccion.map((m,i)=>(i+1)+'. '+m.descripcion+(m.clase==='tarea'?(m.fechaAudiencia?' Audiencia: '+fmt(m.fechaAudiencia)+'.':''):' Líbrese requerimiento a '+m.organismo+'.')).join('\n'):'Sin medidas adicionales seleccionadas en esta propuesta.';
+ texto+='\n\nCúmplase y oportunamente vuelvan las actuaciones a despacho.';
+ $('#despacho').value=texto;
+}
+</script>
