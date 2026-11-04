@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><script>
+
+const servidorDemo = (() => {
+ let store={}, bloqueado=false, emailActivo='',contador=0;
+ const read=()=>store,write=s=>store=s;
+ const sheet=n=>({
+  getDataRange(){const rows=read()[n]||[];return {getValues:()=>rows.length?rows:[['']]};},
+  getLastRow(){return (read()[n]||[]).length;},getMaxRows(){return 100000;},getMaxColumns(){return 50;},
+  insertRowsAfter(){},insertColumnsAfter(){},setFrozenRows(){},
+  getRange(row,col,nr,nc){return {
+   getValues(){const r=read()[n]||[];return Array.from({length:nr},(_,i)=>Array.from({length:nc},(_,j)=>r[row-1+i]?.[col-1+j]??''));},
+   setValues(values){const s=read(),r=s[n]||[];values.forEach((line,i)=>{r[row-1+i]??=[];line.forEach((v,j)=>r[row-1+i][col-1+j]=v);});while(r.length&&r[r.length-1].every(v=>v===''))r.pop();s[n]=r;write(s);return this;},
+   clearContent(){const s=read(),r=s[n]||[];for(let i=0;i<nr;i++)if(r[row-1+i])for(let j=0;j<nc;j++)r[row-1+i][col-1+j]='';while(r.length&&r[r.length-1].every(v=>v===''))r.pop();s[n]=r;write(s);return this;},
+   setBackground(){return this;},setFontColor(){return this;},setFontWeight(){return this;},setNumberFormat(){return this;}
+  };}
+ });
+ const ss={getSheetByName:n=>read()[n]?sheet(n):null,insertSheet(n){const s=read();s[n]=[];write(s);return sheet(n);},setSpreadsheetTimeZone(){},getId:()=> 'demostracion-sin-google',getUrl:()=> 'Base ficticia en memoria'};
+ const props={};
+ const SpreadsheetApp={openById:()=>ss,getActiveSpreadsheet:()=>ss,flush(){}};
+ const PropertiesService={getScriptProperties:()=>({getProperty:k=>props[k]||null,setProperty:(k,v)=>props[k]=v,deleteProperty:k=>delete props[k]})};
+ const Session={getActiveUser:()=>({getEmail:()=>emailActivo})};
+ const LockService={getScriptLock:()=>({tryLock(){if(bloqueado)return false;bloqueado=true;return true;},releaseLock(){bloqueado=false;}})};
+ const Utilities={getUuid:()=> 'demo-'+Date.now().toString(36)+'-'+(++contador).toString(36),formatDate:(fecha,tz,formato)=>{
+  const partes=new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(fecha),v={};partes.forEach(p=>v[p.type]=p.value);
+  const dia=v.year+'-'+v.month+'-'+v.day;return formato==='yyyy-MM-dd'?dia:dia+'T'+v.hour+':'+v.minute+':'+v.second+'-03:00';
+ }};
+ /** Modelo, validaciones y fechas. V8; sin dependencias externas. */
+const TZ_ = 'America/Argentina/Buenos_Aires';
+const USUARIAS_ = ['Rocío Albarracín','Laura Sánchez','Cecilia Attolini','Andrea Ramat','Mara Torres'];
+const ESTADOS_ = ['En seguimiento','Evaluación 308 / Desestimación','Cerrada'];
+const MED_ESTADOS_ = ['Pendiente','Solicitada','Reiterada','Recibida','No corresponde','Dejada sin efecto'];
+const TERMINALES_ = ['Recibida','No corresponde','Dejada sin efecto'];
+const ESQUEMA_ = {
+ CAUSAS: ['id','ipp','fechaHecho','fechaSumario','instructora','resultado','tipo','potencial','dato','principalTipo','principalRecibida','evaluacionPendiente','estado','fechaAlta','usuariaAlta','datos','periciaEstado','periciaFecha','oracEstado','oracFecha','oracReiteracion','oracSegunda','oracDevolucion','oracPrimera','version','ultimaUsuaria'],
+ MEDIDAS: ['id','causaId','tipo','descripcion','organismo','estado','fechaSolicitud','plazo','primeraAlerta','fechaReiteracion','segundaAlerta','fechaRecepcion','principal','ultimaUsuaria','version','sugerenciaClave','necesariaEvaluacion','naturaleza'],
+ TAREAS: ['id','causaId','tipo','descripcion','estado','fechaCreacion','fechaAudiencia','primeraAlerta','fechaReiteracion','segundaAlerta','fechaCumplida','ultimaUsuaria','version','sugerenciaClave','evaluacionSuspendida','fechaIngresoEvaluacion','horaAudiencia','testigoId'],
+ BITACORA: ['id','fechaHora','usuaria','causaId','ipp','referenciaId','accion','detalle'],
+ CONFIGURACION: ['clave','dias','descripcion']
+};
+const PLAZOS_ = {
+ RML:10, CRIP:15, INFORME_TRANSITO:15, FECHA_ACCIDENTOLOGICA:10, DICTAMEN_ACCIDENTOLOGICO:20,
+ HISTORIA_CLINICA:10, FECHA_MEDICA:15, DICTAMEN_MEDICO:30, ORAC:30, EVALUACION:15, SEGUNDA_ALERTA:5,
+ GENERAL:15, PROXIMA:3, CAMARAS_CONSERVACION:30, CAMARAS_PREVENTIVA_1:10, CAMARAS_PREVENTIVA_2:5,
+ AMPLIACION_MEDICA:30, ESPECIALISTA:30
+};
+// [clave, etiqueta, opciones, condición opcional]. Primer opción vacía obligatoria en cliente.
+const CAMPOS_ = {
+ 'Tránsito': [
+ ['victima','Víctima',['Insta','No insta']],['fuga','Fuga del conductor',['Sí','No','No surge']],
+ ['camaras','Cámaras',['No hay / no se localizaron','Solicitadas / pendientes','Recibidas']],
+ ['utilidad','Contenido de cámaras',['Muestran el hecho','No muestran el hecho','No permiten determinar claramente la mecánica'],'camaras'],
+ ['preservacion','Preservación de videofilmaciones',['No consta solicitud de preservación','Preservación solicitada, sin confirmación','Preservación confirmada','Videofilmaciones recibidas']],
+ ['cientifica','Policía Científica',['Intervino','No intervino','No surge del sumario']],
+ ['testigos','Testigos',['Sí','No','Pendientes de individualización']],
+ ['rml','RML',['Incorporado','No incorporado','No corresponde']],
+ ['historia','Historia clínica hospitalaria',['Incorporada','Solicitar','No corresponde']],
+ ['defuncion','Certificado de defunción',['Incorporado','Pendiente','No corresponde'],'homicidio']],
+ 'Mala praxis': [
+ ['victima','Víctima',['Insta','No insta']],
+ ['historia','Historia clínica',['Incorporada completa','Incorporada incompleta','No incorporada','Requiere allanamiento','Requiere secuestro','Ya secuestrada']],
+ ['allanamiento','Allanamiento',['No corresponde','Solicitar','Autorizado','Cumplido'],'allanamiento'],
+ ['autopsia','Autopsia',['Incorporada','Pendiente','No corresponde'],'medicoContextual'],
+ ['anatomia','Pericia anatomopatológica',['Incorporada','Pendiente','No corresponde'],'medicoContextual'],
+ ['defuncion','Certificado de defunción',['Incorporado','Pendiente','No corresponde'],'homicidio'],
+ ['complementaria','Documentación médica complementaria',['Completa','Incompleta','Pendiente de requerir','No corresponde']],
+ ['profesionales','Profesionales intervinientes',['Identificados','Parcialmente identificados','No identificados']],
+ ['declaracion','Declaración de víctima / denunciante',['Recibida','Pendiente','No corresponde']],
+ ['ampliacion','Ampliación de pericia médica',['No corresponde','Pendiente','Solicitada','Recibida']],
+ ['especialista','Pericia por especialista',['No corresponde','Pendiente','Solicitada','Recibida']]],
+ 'Otros': [
+ ['victima','Víctima',['Insta','No insta']],['camaras','Cámaras',['No hay','Solicitadas','Recibidas']],
+ ['utilidad','Contenido de cámaras',['Muestran el hecho','No muestran el hecho','No permiten determinar claramente la mecánica'],'camaras'],
+ ['preservacion','Preservación de videofilmaciones',['No consta solicitud de preservación','Preservación solicitada, sin confirmación','Preservación confirmada','Videofilmaciones recibidas']],
+ ['cientifica','Policía Científica',['Intervino','No intervino','No surge']],['testigos','Testigos',['Sí','No','Pendientes de individualización']],
+ ['rml','RML',['Incorporado','No incorporado','No corresponde']],
+ ['defuncion','Certificado de defunción',['Incorporado','Pendiente','No corresponde'],'homicidio'],
+ ['inspeccion','Inspección técnica / condiciones de seguridad',['Realizada','Pendiente','No corresponde']],
+ ['tecnica','Documentación técnica / administrativa',['Incorporada','Solicitar','No corresponde']]]
+};
+function exigir_(ok,msg) { if(!ok) throw new Error(msg); }
+function texto_(v,max) { exigir_(typeof v==='string' && v.length<=max,'Texto inválido o demasiado extenso.'); return v.trim(); }
+function hoy_() { return Utilities.formatDate(new Date(),TZ_,'yyyy-MM-dd'); }
+function ahora_() { return Utilities.formatDate(new Date(),TZ_,"yyyy-MM-dd'T'HH:mm:ssXXX"); }
+function fecha_(s,opcional) {
+ if(opcional && !s) return '';
+ exigir_(typeof s==='string' && /^\d{4}-\d{2}-\d{2}$/.test(s),'Seleccione una fecha válida.');
+ const d=new Date(s+'T12:00:00Z');
+ exigir_(!isNaN(d.getTime()) && d.toISOString().slice(0,10)===s,'Fecha inexistente.'); return s;
+}
+function sumarDias_(s,n) {
+ fecha_(s); exigir_(Number.isInteger(n) && n>=0 && n<=3650,'Plazo inválido (0 a 3650 días).');
+ const d=new Date(s+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10);
+}
+function visible_(f,c) {
+ if(!f[3]) return true;
+ if(f[3]==='medicoContextual') return c.resultado==='Homicidio culposo'||c.datos.estudiosExcepcionales===true;
+ if(f[3]==='homicidio') return c.resultado==='Homicidio culposo';
+ if(f[3]==='camaras') return c.datos.camaras==='Recibidas';
+ if(f[3]==='allanamiento') return ['Requiere allanamiento','Requiere secuestro','Ya secuestrada'].includes(c.datos.historia);
+ return false;
+}
+function validarCausa_(p) {
+ exigir_(p && typeof p==='object','Causa inválida.');
+ const c={ipp:texto_(p.ipp,100).toUpperCase(),fechaHecho:fecha_(p.fechaHecho),fechaSumario:fecha_(p.fechaSumario),instructora:p.instructora,resultado:p.resultado,tipo:p.tipo,dato:texto_(p.dato||'',500),datos:{}};
+ exigir_(c.ipp,'Ingrese la IPP.'); exigir_(USUARIAS_.includes(c.instructora),'Seleccione instructora.');
+ exigir_(['Lesiones culposas','Homicidio culposo'].includes(c.resultado),'Seleccione resultado.');
+ exigir_(Object.keys(CAMPOS_).includes(c.tipo),'Seleccione investigación.');
+ exigir_(c.fechaHecho<=c.fechaSumario && c.fechaSumario<=hoy_(),'Las fechas deben respetar hecho ≤ recepción ≤ hoy.');
+ c.datos=Object.assign({},p.datos && typeof p.datos==='object'?p.datos:{});
+ if(c.tipo==='Mala praxis'&&c.datos.estudiosExcepcionales===undefined)c.datos.estudiosExcepcionales=['autopsia','anatomia'].some(k=>c.datos[k]&&c.datos[k]!=='No corresponde');
+ const limpios={estudiosExcepcionales:c.datos.estudiosExcepcionales===true}; CAMPOS_[c.tipo].forEach(f=>{if(visible_(f,c)) {let valor=c.datos[f[0]];if(f[0]==='preservacion'&&!valor) valor=c.datos.camaras==='Recibidas'?'Videofilmaciones recibidas':'No consta solicitud de preservación';exigir_(f[2].includes(valor),'Complete: '+f[1]);limpios[f[0]]=valor;}});
+ if(c.datos.testigos==='Sí') {
+  const ts=c.datos.listaTestigos||[];
+  exigir_(Array.isArray(ts)&&ts.length<=30,'Máximo 30 testigos por causa.');
+  const ids=new Set();
+  limpios.listaTestigos=ts.map((t,i)=>{
+   const id=texto_(t.id||('testigo-'+(i+1)),100);exigir_(!ids.has(id),'Identificador de testigo duplicado.');ids.add(id);
+   const nombre=texto_(t.nombre||'',150),fecha=fecha_(t.fecha,true),hora=hora_(t.hora||'');
+   const estado=t.estado||((fecha)?'Audiencia designada':nombre?'Individualizado':'Individualización pendiente');
+   exigir_(['Individualización pendiente','Individualizado','Audiencia designada','Declaración recibida'].includes(estado),'Estado de testigo inválido.');
+   if(estado!=='Individualización pendiente') exigir_(nombre,'Individualice al testigo antes de designar o recibir su declaración.');
+   if(estado==='Audiencia designada') exigir_(fecha,'Seleccione la fecha de audiencia.');
+   return {id,nombre,telefono:texto_(t.telefono||'',60),fecha,hora,estado};
+  }).filter(t=>t.nombre||t.telefono||t.fecha||t.estado!=='Individualización pendiente');
+ }
+ if(c.tipo!=='Mala praxis') {
+  exigir_((limpios.preservacion==='Videofilmaciones recibidas')===(limpios.camaras==='Recibidas'),'La recepción de cámaras y el estado Videofilmaciones recibidas deben coincidir.');
+ }
+ if(c.tipo==='Mala praxis') {
+  if(!limpios.autopsia)limpios.autopsia='No corresponde';if(!limpios.anatomia)limpios.anatomia='No corresponde';
+  limpios.documentacionReunida=c.datos.documentacionReunida===true;
+  if(limpios.documentacionReunida) exigir_(documentacionLista_(limpios),'La documentación aún presenta pendientes. Complete los estados antes de declarar documentación reunida.');
+ }
+ c.datos=limpios;
+ if(c.tipo==='Otros'&&String(p.principalTipo||'').startsWith('Otra: ')){p=Object.assign({},p,{principalOtra:p.principalTipo.slice(6),principalTipo:'Otra'});}
+ c.principalTipo=c.tipo==='Tránsito'?'Dictamen accidentológico':c.tipo==='Mala praxis'?'Dictamen médico':texto_(p.principalTipo||'',150);
+ if(c.tipo==='Otros') {
+  exigir_(['Pericia de seguridad e higiene','Pericia mecánica','Informe técnico','Otra'].includes(p.principalTipo),'Seleccione prueba principal.');
+  if(p.principalTipo==='Otra') { const detalle=texto_(p.principalOtra||'',120);exigir_(detalle,'Describa la prueba principal.');c.principalTipo='Otra: '+detalle; }
+ }
+ return c;
+}
+function documentacionLista_(d) {
+ return ['Incorporada completa','Ya secuestrada'].includes(d.historia) && ['Completa','No corresponde'].includes(d.complementaria) && ['Incorporada','No corresponde'].includes(d.autopsia) && ['Incorporada','No corresponde'].includes(d.anatomia) && (!d.defuncion||['Incorporado','No corresponde'].includes(d.defuncion)) && d.profesionales==='Identificados' && ['Recibida','No corresponde'].includes(d.declaracion) && (!d.allanamiento||['No corresponde','Cumplido'].includes(d.allanamiento));
+}
+
+function hora_(s) {exigir_(!s||/^([01]\d|2[0-3]):[0-5]\d$/.test(s),'Hora inválida.');return s;}
+function diasEntre_(desde,hasta) {return Math.floor((new Date(fecha_(hasta)+'T12:00:00Z')-new Date(fecha_(desde)+'T12:00:00Z'))/86400000);}
+/** Cada petición se vincula a una cuenta verificada; nunca hay modo anónimo. */
+function identidad_(seleccion) {
+ const email=String(Session.getActiveUser().getEmail()||'').trim().toLowerCase();
+ exigir_(email,'Configuración de identidad: Google no informó la cuenta. Despliegue ejecutando como la usuaria que accede y autorice userinfo.email.');
+ const raw=PropertiesService.getScriptProperties().getProperty('USUARIAS_EMAILS');
+ exigir_(raw,'Configuración de identidad: falta USUARIAS_EMAILS en las propiedades del proyecto.');
+ let mapa;try{mapa=JSON.parse(raw);}catch(e){throw new Error('Configuración de identidad: USUARIAS_EMAILS debe ser un objeto JSON válido.');}
+ exigir_(mapa&&typeof mapa==='object'&&!Array.isArray(mapa),'Configuración de identidad inválida.');
+ const cuentas=new Set();
+ Object.keys(mapa).forEach(nombre=>{
+  exigir_(USUARIAS_.includes(nombre)&&typeof mapa[nombre]==='string'&&/^[^@\s]+@[^@\s]+$/.test(mapa[nombre]),'Configuración de identidad: correspondencia inválida.');
+  const correo=mapa[nombre].trim().toLowerCase();exigir_(!cuentas.has(correo),'Configuración de identidad: una cuenta no puede representar a varias usuarias.');cuentas.add(correo);
+ });
+ exigir_(USUARIAS_.includes(seleccion)&&typeof mapa[seleccion]==='string'&&mapa[seleccion].trim().toLowerCase()===email,'La cuenta Google no está autorizada para la usuaria seleccionada.');
+ return seleccion;
+}
+
+const TIPOS_MEDIDA_ = ['PERSONALIZADA','RML','CRIP','HISTORIA_CLINICA','INFORME_TRANSITO','PRESERVAR_CAMARAS','CAMARAS','INDIVIDUALIZAR','INSPECCION','DOCUMENTACION_TECNICA','FECHA_MEDICA','FECHA_ACCIDENTOLOGICA','DICTAMEN_MEDICO','DICTAMEN_ACCIDENTOLOGICO','AMPLIACION_MEDICA','ESPECIALISTA','PRINCIPAL_OTROS'];
+
+/** Motores puros. Sugerencias sin escritura. */
+function potencial_(c) {
+ if(c.tipo==='Mala praxis') return '';
+ const d=c.datos;
+ if(d.utilidad==='Muestran el hecho' || d.cientifica==='Intervino' || d.testigos==='Sí'&&(d.listaTestigos||[]).some(t=>t.nombre) || (c.tipo==='Otros' && (d.inspeccion==='Realizada'||d.tecnica==='Incorporada'))) return 'Identificado';
+ if(['Solicitadas / pendientes','Solicitadas'].includes(d.camaras) || ['No surge','No surge del sumario'].includes(d.cientifica) || (d.testigos==='Pendientes de individualización'||d.testigos==='Sí'&&!(d.listaTestigos||[]).some(t=>t.nombre)) || (c.tipo==='Otros' && (d.inspeccion==='Pendiente'||d.tecnica==='Solicitar'))) return 'Requiere información';
+ return 'Limitado';
+}
+function sugerencias_(c,config) {
+ const d=c.datos, s=[];
+ const med=(tipo,descripcion,organismo,principal)=>s.push({clave:tipo,tipo,descripcion,organismo,plazo:config[tipo]===undefined?config.GENERAL:config[tipo],principal:!!principal,necesariaEvaluacion:!!principal||['AMPLIACION_MEDICA','ESPECIALISTA'].includes(tipo),clase:'medida'});
+ const tarea=(tipo,descripcion,fecha,clave,extra)=>s.push(Object.assign({clave:clave||tipo,tipo,descripcion,fechaAudiencia:fecha||'',clase:'tarea'},extra||{}));
+ if(d.rml==='No incorporado') med('RML','Solicitar reconocimiento médico legal.','Cuerpo Médico');
+ if(d.historia==='Solicitar' || (c.tipo==='Mala praxis' && ['Incorporada incompleta','No incorporada'].includes(d.historia))) med('HISTORIA_CLINICA','Requerir historia clínica completa y constancias faltantes.','Establecimiento de salud');
+ if(d.defuncion==='Pendiente') med('DEFUNCION','Solicitar certificado de defunción.','Registro / establecimiento de salud');
+ if(c.tipo!=='Mala praxis') {
+  if(!['Preservación confirmada','Videofilmaciones recibidas'].includes(d.preservacion)&&d.camaras!=='Recibidas')med('PRESERVAR_CAMARAS','Requerir urgente preservación de videofilmaciones y confirmación de resguardo.','Centro de Monitoreo / titular de cámaras');
+  if(['Solicitadas / pendientes','Solicitadas'].includes(d.camaras)||d.preservacion==='Preservación confirmada') med('CAMARAS','Requerir remisión de videofilmaciones.','Dependencia policial / titular de cámaras');
+  if(d.cientifica==='Intervino') med('CRIP','Solicitar CRIP y actuaciones de Policía Científica.','Policía Científica');
+  if(['No surge','No surge del sumario'].includes(d.cientifica)) med('VERIFICAR_CIENTIFICA','Informar si intervino Policía Científica y remitir actuaciones.','Dependencia policial');
+  if(d.camaras==='Recibidas') tarea('Acta de apertura','Realizar acta de apertura de videofilmaciones.','','ACTA_VIDEOS');
+  if(d.testigos==='Sí') (d.listaTestigos||[]).filter(t=>t.nombre&&t.estado!=='Declaración recibida').forEach((t,i)=>tarea('Audiencia testimonial','Designar audiencia testimonial de '+t.nombre+(t.telefono?' · Tel. '+t.telefono:''),t.fecha,'TESTIMONIAL_'+(t.id||'testigo-'+(i+1)),{testigoId:t.id||'testigo-'+(i+1),testigoNombre:t.nombre,horaAudiencia:t.hora||''}));
+  if(d.testigos==='Pendientes de individualización'||d.testigos==='Sí'&&(!(d.listaTestigos||[]).length||(d.listaTestigos||[]).some(t=>!t.nombre))) med('INDIVIDUALIZAR','Individualizar testigos presenciales.','Dependencia policial');
+  if(c.tipo==='Tránsito') {
+   if(potencial_(c)==='Identificado') med('INFORME_TRANSITO','Solicitar Informe de Tránsito.','Área de Tránsito');
+   if(d.cientifica==='Intervino'||d.utilidad==='Muestran el hecho') med('FECHA_ACCIDENTOLOGICA','Solicitar fecha de pericia accidentológica.','Policía Científica');
+  } else {
+   if(d.inspeccion==='Pendiente') med('INSPECCION','Solicitar inspección técnica y condiciones de seguridad.','Organismo técnico competente');
+   if(d.tecnica==='Solicitar') med('DOCUMENTACION_TECNICA','Requerir documentación técnica / administrativa pertinente.','Organismo competente');
+   med('PRINCIPAL_OTROS','Solicitar '+c.principalTipo+'.','Organismo técnico competente',true);
+  }
+ } else {
+  if(d.historia==='Requiere allanamiento' && !['Autorizado','Cumplido'].includes(d.allanamiento)) med('ALLANAMIENTO','Solicitar autorización de allanamiento para obtener documentación médica.','Juzgado de Garantías');
+  if(d.historia==='Requiere secuestro'||(d.historia==='Requiere allanamiento'&&d.allanamiento==='Autorizado')) med('SECUESTRO','Gestionar secuestro y obtención de documentación médica.','Dependencia policial');
+  if(d.autopsia==='Pendiente') med('AUTOPSIA','Requerir protocolo de autopsia.','Cuerpo Médico');
+  if(d.anatomia==='Pendiente') med('ANATOMIA','Requerir pericia anatomopatológica.','Servicio de Anatomía Patológica');
+  if(['Incompleta','Pendiente de requerir'].includes(d.complementaria)) med('DOCUMENTACION_MEDICA','Requerir documentación médica complementaria.','Establecimiento de salud');
+  if(d.profesionales!=='Identificados') med('PROFESIONALES','Individualizar a todos los profesionales intervinientes.','Establecimiento de salud');
+  if(d.declaracion==='Pendiente') tarea('Audiencia testimonial','Recibir declaración de víctima / denunciante.','','MP_DECLARACION');
+  if(d.documentacionReunida && documentacionLista_(d)) med('FECHA_MEDICA','Solicitar fecha de pericia médica.','Asesoría Pericial');
+  if(['Pendiente','Solicitada'].includes(d.ampliacion)) med('AMPLIACION_MEDICA','Requerir ampliación de pericia médica.','Asesoría Pericial',false);
+  if(['Pendiente','Solicitada'].includes(d.especialista)) med('ESPECIALISTA','Requerir pericia por especialista.','Asesoría Pericial',false);
+ }
+ return s;
+}
+function alerta_(x,tipo,hoy,config) {
+ if(tipo==='tarea'&&x.tipo==='Evaluación 308 / Desestimación'&&x.evaluacionSuspendida)return {nivel:'sin',texto:'Evaluación suspendida · prueba necesaria pendiente'};
+ if(tipo==='medida' && TERMINALES_.includes(x.estado) || tipo==='tarea' && x.estado==='Cumplida' || tipo==='orac' && (!x.oracEstado||x.oracEstado==='Devuelta')) return {nivel:'sin',texto:'Sin alerta'};
+ const primera=tipo==='orac'?x.oracPrimera:x.primeraAlerta;
+ const segunda=tipo==='orac'?x.oracSegunda:x.segundaAlerta;
+ const reiteracion=tipo==='orac'?x.oracReiteracion:x.fechaReiteracion;
+ if(!primera) return {nivel:'sin',texto:'Sin plazo'};
+ if(segunda && hoy>=segunda) return {nivel:'rojo',texto:'Segunda alerta · vencida',fecha:segunda};
+ if(reiteracion) return {nivel:'verde',texto:'Reiterada · control '+segunda,fecha:segunda};
+ if(hoy>primera) return {nivel:'rojo',texto:'Vencida · requiere reiteración',fecha:primera};
+ if(hoy===primera) return {nivel:'naranja',texto:'Primera alerta · requiere reiteración',fecha:primera};
+ if(sumarDias_(hoy,config.PROXIMA)>=primera) return {nivel:'amarillo',texto:'Próxima a vencer',fecha:primera};
+ return {nivel:'verde',texto:'Dentro de plazo',fecha:primera};
+}
+/** Índices por causa: consultas O(causas + medidas + tareas), sin filtros anidados. */
+function indiceCausas_(rows) {const m=new Map();rows.forEach(x=>{if(!m.has(x.causaId))m.set(x.causaId,[]);m.get(x.causaId).push(x);});return m;}
+function filtrarCausas_(db,f,hoy,config,indice) {
+ f=f||{};const im=indice||indiceCausas_(db.MEDIDAS);
+ return db.CAUSAS.filter(c=>{
+  if(f.ipp&&!c.ipp.toUpperCase().includes(String(f.ipp).toUpperCase())||f.instructora&&c.instructora!==f.instructora||f.tipo&&c.tipo!==f.tipo||f.resultado&&c.resultado!==f.resultado||f.estado&&c.estado!==f.estado||f.evaluacion&&!c.evaluacionPendiente||f.orac&&(!c.oracEstado||c.oracEstado==='Devuelta')||f.limitado&&c.potencial!=='Limitado')return false;
+  if(f.camaras&&alertaCamaras_(c,hoy,config).nivel!=='rojo')return false;
+  const activas=(im.get(c.id)||[]).filter(m=>!TERMINALES_.includes(m.estado));
+  return (!f.vencidas||activas.some(m=>alerta_(m,'medida',hoy,config).nivel==='rojo'))&&(!f.reiteradas||activas.some(m=>m.estado==='Reiterada'))&&(!f.proximas||activas.some(m=>alerta_(m,'medida',hoy,config).nivel==='amarillo'));
+ });
+}
+function tablero_(db,f,hoy,config) {
+ const im=indiceCausas_(db.MEDIDAS),causas=filtrarCausas_(db,f,hoy,config,im),ids=new Set(causas.map(c=>c.id));
+ const medidas=db.MEDIDAS.filter(m=>ids.has(m.causaId)).map(m=>Object.assign({},m,{alerta:alerta_(m,'medida',hoy,config)}));
+ const tareas=db.TAREAS.filter(t=>ids.has(t.causaId)).map(t=>Object.assign({},t,{alerta:alerta_(t,'tarea',hoy,config)}));
+ const decoradas=causas.map(c=>Object.assign({},c,{datos:undefined,oracAlerta:alerta_(c,'orac',hoy,config),camarasAlerta:alertaCamaras_(c,hoy,config)}));
+ const kpi={vencidas:0,proximas:0,reiteradas:0,evaluacion:causas.filter(c=>c.evaluacionPendiente).length,limitado:causas.filter(c=>c.potencial==='Limitado').length,orac:causas.filter(c=>c.oracEstado&&c.oracEstado!=='Devuelta').length,camaras:decoradas.filter(c=>c.camarasAlerta.nivel==='rojo').length};
+ medidas.forEach(m=>{if(m.alerta.nivel==='rojo')kpi.vencidas++;if(m.alerta.nivel==='amarillo')kpi.proximas++;if(m.estado==='Reiterada')kpi.reiteradas++;});
+ const porId=new Map(causas.map(c=>[c.id,c]));
+ const evaluaciones=tareas.filter(t=>t.tipo==='Evaluación 308 / Desestimación'&&t.estado==='Pendiente'&&!t.evaluacionSuspendida).map(t=>Object.assign({},t,{ipp:porId.get(t.causaId).ipp,instructora:porId.get(t.causaId).instructora,diasTranscurridos:diasEntre_(t.fechaIngresoEvaluacion||t.fechaCreacion,hoy)}));
+ const activas=medidas.filter(m=>!TERMINALES_.includes(m.estado));
+ const rango={rojo:0,naranja:1,amarillo:2,verde:3,sin:4};activas.sort((a,b)=>rango[a.alerta.nivel]-rango[b.alerta.nivel]||String(a.alerta.fecha||'').localeCompare(b.alerta.fecha||''));
+ evaluaciones.sort((a,b)=>rango[a.alerta.nivel]-rango[b.alerta.nivel]||a.primeraAlerta.localeCompare(b.primeraAlerta));
+ const visibles=activas.filter(m=>(!f||!f.proximas||m.alerta.nivel==='amarillo')&&(!f||!f.vencidas||m.alerta.nivel==='rojo')&&(!f||!f.reiteradas||m.estado==='Reiterada'));
+ const cp=pagina_(decoradas,f&&f.paginaCausas),mp=pagina_(visibles,f&&f.paginaMedidas),ep=pagina_(evaluaciones,f&&f.paginaEvaluaciones);
+ const resumir=c=>({id:c.id,ipp:c.ipp,instructora:c.instructora,tipo:c.tipo,resultado:c.resultado,estado:c.estado,potencial:c.potencial,fechaSumario:c.fechaSumario,oracEstado:c.oracEstado,oracAlerta:c.oracAlerta,camarasAlerta:c.camarasAlerta,evaluacionPendiente:c.evaluacionPendiente});
+ return {hoy,causas:cp.items.map(resumir),medidas:mp.items.map(m=>Object.assign({},m,{ipp:porId.get(m.causaId).ipp,instructora:porId.get(m.causaId).instructora})),tareas:[],evaluaciones:ep.items,kpi,paginas:{causas:cp.info,medidas:mp.info,evaluaciones:ep.info},totalCausas:decoradas.length,camarasCriticas:decoradas.filter(c=>['rojo','naranja'].includes(c.camarasAlerta.nivel)).slice(0,100).map(resumir)};
+}
+function alertaCamaras_(c,hoy,config) {
+ if(!['Tránsito','Otros'].includes(c.tipo))return {nivel:'sin',texto:'No corresponde',riesgo:false};
+ const d=c.datos,limite=sumarDias_(c.fechaHecho,config.CAMARAS_CONSERVACION),restan=diasEntre_(hoy,limite);
+ if(d.camaras==='Recibidas'||d.preservacion==='Videofilmaciones recibidas')return {nivel:'verde',texto:'Imágenes recibidas',riesgo:false,fecha:limite};
+ if(d.preservacion==='Preservación confirmada')return {nivel:'azul',texto:'Preservación confirmada · recepción pendiente',riesgo:false,fecha:limite};
+ const estado=d.preservacion==='Preservación solicitada, sin confirmación'?'Preservación solicitada sin confirmación':'Preservación pendiente';
+ const nivel=restan<=config.CAMARAS_PREVENTIVA_2?'rojo':restan<=config.CAMARAS_PREVENTIVA_1?'naranja':'verde';
+ return {nivel,estado,texto:estado+' · '+(restan<0?'Plazo de referencia superado; verificar disponibilidad, sin presumir destrucción':restan===0?'Hoy se cumple el plazo de conservación de referencia':restan+' días hasta el plazo de referencia'),riesgo:true,fecha:limite,diasRestantes:restan};
+}
+/** Una sugerencia se propone una sola vez por identidad semántica, aunque ya esté recibida. */
+function sugerenciasNuevas_(db,c,config) {
+ const medidas=db.MEDIDAS.filter(m=>m.causaId===c.id),tareas=db.TAREAS.filter(t=>t.causaId===c.id);
+ return sugerencias_(c,config).filter(s=>{
+  if(['FECHA_MEDICA','FECHA_ACCIDENTOLOGICA'].includes(s.tipo)&&c.periciaEstado!=='Sin iniciar')return false;
+  if(s.clase==='medida'&&['AMPLIACION_MEDICA','ESPECIALISTA'].includes(s.tipo)){const anteriores=medidas.filter(m=>m.tipo===s.tipo);s.clave=s.tipo+'_N'+(anteriores.length+1);return !anteriores.some(m=>!TERMINALES_.includes(m.estado));}
+  if(s.clase==='medida')return !medidas.some(m=>m.sugerenciaClave===s.clave||m.tipo===s.tipo);
+  return !tareas.some(t=>t.sugerenciaClave===s.clave||s.testigoId&&t.testigoId===s.testigoId||!t.sugerenciaClave&&t.tipo===s.tipo&&(t.descripcion===s.descripcion||s.tipo==='Acta de apertura'||s.testigoNombre&&t.descripcion.startsWith('Designar audiencia testimonial de '+s.testigoNombre)));
+ });
+}
+/** El dictamen original es insustituible en Tránsito y Mala praxis. */
+function madurez_(c,medidas) {
+ const principal=c.tipo==='Mala praxis'?'DICTAMEN_MEDICO':c.tipo==='Tránsito'?'DICTAMEN_ACCIDENTOLOGICO':'';
+ const originales=medidas.filter(m=>principal?m.tipo===principal:m.principal===true);
+ const recibida=originales.some(m=>m.estado==='Recibida');
+ const necesarias=medidas.filter(m=>m.principal===true||m.necesariaEvaluacion===true||c.tipo==='Mala praxis'&&['AMPLIACION_MEDICA','ESPECIALISTA'].includes(m.tipo));
+ const bloqueantes=necesarias.filter(m=>!TERMINALES_.includes(m.estado));
+ const sinOrdenar=c.tipo==='Mala praxis'&&['ampliacion','especialista'].some(k=>['Pendiente','Solicitada'].includes(c.datos[k])&&!medidas.some(m=>m.tipo===(k==='ampliacion'?'AMPLIACION_MEDICA':'ESPECIALISTA')&&!TERMINALES_.includes(m.estado)));
+ const fechas=necesarias.filter(m=>m.estado==='Recibida').map(m=>m.fechaRecepcion).filter(Boolean).sort();
+ return {recibida,madura:recibida&&(!principal||c.periciaEstado==='Dictamen recibido')&&!bloqueantes.length&&!sinOrdenar,bloqueantes,fecha:fechas[fechas.length-1]||hoy_()};
+}
+
+function pagina_(items,n) {n=Number(n||0);exigir_(Number.isInteger(n)&&n>=0,'Página inválida.');const total=items.length,ultima=Math.max(0,Math.ceil(total/100)-1);n=Math.min(n,ultima);return {items:items.slice(n*100,(n+1)*100),info:{pagina:n,total,paginas:ultima+1}};}
+
+/** Persistencia compartida. Todas las lecturas/escrituras pasan por el mismo ScriptLock. */
+function libro_() {
+ const id=PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+ exigir_(id,'Ejecute inicializar_ desde el editor del proyecto vinculado a la Sheet.');
+ return SpreadsheetApp.openById(id);
+}
+function conBloqueo_(fn) {
+ const lock=LockService.getScriptLock();
+ exigir_(lock.tryLock(30000),'La base está ocupada. Actualice e intente nuevamente.');
+ try { return fn(); } finally { lock.releaseLock(); }
+}
+function leerDb_(opciones) {
+ const ss=libro_(), db={};opciones=opciones||{};
+ Object.keys(ESQUEMA_).forEach(n=>{
+  if(n==='BITACORA'&&opciones.omitirBitacora){const sh=ss.getSheetByName(n);exigir_(sh,'Falta hoja BITACORA.');cabeceraValida_(sh,n);db[n]=[];db._bitacoraParcial=true;return;}
+  const sh=ss.getSheetByName(n);exigir_(sh,'Falta hoja '+n+'. Ejecute inicializar_.');
+  const rows=sh.getDataRange().getValues(), h=ESQUEMA_[n];
+  exigir_(JSON.stringify(rows[0])===JSON.stringify(h),'Encabezados modificados en '+n+'. Restaure la estructura.');
+  db[n]=rows.slice(1).filter(r=>r[0]!=='').map(r=>{
+   const x={};h.forEach((k,i)=>{let v=r[i]; if(v instanceof Date) v=Utilities.formatDate(v,TZ_,'yyyy-MM-dd'); if(typeof v==='string' && v.startsWith("'")) v=v.slice(1); x[k]=v;});
+   if(n==='CAUSAS') x.datos=JSON.parse(x.datos||'{}'); return x;
+  });
+ });return db;
+}
+function celda_(v) {
+ if(v===null||v===undefined) return '';
+ if(typeof v==='object') return JSON.stringify(v);
+ // El apóstrofe impide fórmulas introducidas por descripciones, IPP o teléfonos.
+ if(typeof v==='string' && /^[=+@\-']/.test(v)) return "'"+v;
+ return v;
+}
+function escribirTabla_(n,rows) {
+ const sh=libro_().getSheetByName(n), h=ESQUEMA_[n], count=Math.max(sh.getLastRow(),rows.length+1);
+ if(sh.getMaxRows()<count) sh.insertRowsAfter(sh.getMaxRows(),count-sh.getMaxRows());
+ if(count>1) sh.getRange(2,1,count-1,h.length).clearContent();
+ if(rows.length) sh.getRange(2,1,rows.length,h.length).setValues(rows.map(x=>h.map(k=>celda_(x[k]))));
+}
+/** Escritura por filas modificadas. La bitácora ordinaria solo se agrega al final. */
+function guardarDb_(prev,db) {
+ const ss=libro_(),planes=[];
+ Object.keys(ESQUEMA_).forEach(n=>{
+  const h=ESQUEMA_[n],sh=ss.getSheetByName(n),old=prev[n],actual=db[n];
+  if(n==='BITACORA'&&db._bitacoraParcial){
+   if(actual.length){const inicio=sh.getLastRow()+1;planes.push({aplicar:()=>escribirRango_(sh,inicio,h,actual),restaurar:()=>sh.getRange(inicio,1,actual.length,h.length).clearContent()});}return;
+  }
+  if(JSON.stringify(old)===JSON.stringify(actual))return;
+  const compactar=actual.length<old.length||old.some((r,i)=>actual[i]&&actual[i][h[0]]!==r[h[0]]);
+  if(compactar){planes.push({aplicar:()=>escribirTabla_(n,actual),restaurar:()=>escribirTabla_(n,old)});return;}
+  let inicio=-1,grupo=[];
+  const agregar=()=>{if(!grupo.length)return;const fila=inicio+2,nuevas=grupo.slice(),anteriores=old.slice(inicio,inicio+grupo.length),extras=grupo.length-anteriores.length;planes.push({aplicar:()=>escribirRango_(sh,fila,h,nuevas),restaurar:()=>{if(anteriores.length)escribirRango_(sh,fila,h,anteriores);if(extras>0)sh.getRange(fila+anteriores.length,1,extras,h.length).clearContent();}});grupo=[];inicio=-1;};
+  actual.forEach((r,i)=>{if(JSON.stringify(r)!==JSON.stringify(old[i])){if(inicio<0)inicio=i;grupo.push(r);}else agregar();});agregar();
+ });
+ try {planes.forEach(p=>p.aplicar());SpreadsheetApp.flush();}
+ catch(e) {
+  try{planes.slice().reverse().forEach(p=>p.restaurar());SpreadsheetApp.flush();}catch(restore){throw new Error('Error de escritura y restauración. Detenga el uso y restaure una copia de seguridad.');}
+  throw new Error('No se guardó la operación. Se restauró el estado previo. Intente nuevamente.');
+ }
+}
+function escribirRango_(sh,fila,h,rows) {
+ const ultimo=fila+rows.length-1;if(sh.getMaxRows()<ultimo)sh.insertRowsAfter(sh.getMaxRows(),ultimo-sh.getMaxRows());
+ sh.getRange(fila,1,rows.length,h.length).setValues(rows.map(x=>h.map(k=>celda_(x[k]))));
+}
+/** Lectura de auditoría por bloques desde el final, máximo 100 resultados por página. */
+function cabeceraValida_(sh,n){exigir_(JSON.stringify(sh.getRange(1,1,1,ESQUEMA_[n].length).getValues()[0])===JSON.stringify(ESQUEMA_[n]),'Encabezados modificados en '+n+'. Restaure la estructura.');}
+function paginaBitacora_(causaId,hasta) {
+ const sh=libro_().getSheetByName('BITACORA'),h=ESQUEMA_.BITACORA,ultimo=sh.getLastRow();
+ cabeceraValida_(sh,'BITACORA');
+ let fin=hasta===undefined?ultimo:Number(hasta);exigir_(Number.isInteger(fin)&&fin>=1&&fin<=ultimo,'Página de bitácora inválida.');
+ const items=[];
+ while(fin>=2&&items.length<100){const inicio=Math.max(2,fin-499),rows=sh.getRange(inicio,1,fin-inicio+1,h.length).getValues();
+  for(let i=rows.length-1;i>=0;i--){fin=inicio+i-1;if(rows[i][3]!==causaId)continue;const x={};h.forEach((k,j)=>x[k]=rows[i][j]);items.push(x);if(items.length===100)break;}
+ }
+ return {items,siguiente:fin>=2?fin:null};
+}
+function config_(db) {
+ const c=Object.assign({},PLAZOS_);
+ db.CONFIGURACION.forEach(r=>{exigir_(Object.prototype.hasOwnProperty.call(c,r.clave),'Clave de configuración desconocida: '+r.clave);const n=Number(r.dias);exigir_(Number.isInteger(n)&&n>=0&&n<=3650,'Plazo inválido en Configuración: '+r.clave);c[r.clave]=n;});exigir_(c.CAMARAS_PREVENTIVA_1>=c.CAMARAS_PREVENTIVA_2&&c.CAMARAS_PREVENTIVA_1<=c.CAMARAS_CONSERVACION,'Revise los umbrales de conservación de cámaras.');return c;
+}
+function id_() {return Utilities.getUuid();}
+function registrar_(db,u,c,ref,accion,detalle) {
+ db.BITACORA.push({id:id_(),fechaHora:ahora_(),usuaria:u,causaId:c.id,ipp:c.ipp,referenciaId:ref||'',accion,detalle:detalle||''});
+}
+function obtener_(rows,id) {const r=rows.find(x=>x.id===id);exigir_(r,'El registro ya no existe. Actualice el tablero.');return r;}
+function version_(r,v) {exigir_(r.version===v,'Otra usuaria modificó este registro. Actualice la ficha antes de guardar.');}
+function tocar_(r,u) {r.version=Number(r.version||0)+1;r.ultimaUsuaria=u;}
+/** Inicialización y migración aditiva, repetibles; nunca se borran hojas o registros. */
+function inicializar_() {return migrar_();}
+function migrar_() {
+ return conBloqueo_(()=>{
+  const ss=SpreadsheetApp.getActiveSpreadsheet();exigir_(ss,'Vincule este proyecto a una Google Sheet.');
+  const props=PropertiesService.getScriptProperties(),previo=props.getProperty('SPREADSHEET_ID');exigir_(!previo||previo===ss.getId(),'Este proyecto ya está asociado a otra base.');
+  // Validar TODAS las cabeceras antes de alterar una sola hoja.
+  const existentes={};Object.keys(ESQUEMA_).forEach(n=>{const sh=ss.getSheetByName(n);if(!sh||!sh.getLastRow()){exigir_(!previo,'Falta la hoja '+n+' en una base ya inicializada. Restaure la copia de seguridad; no se recreó la hoja.');return;}const rows=sh.getDataRange().getValues(),h=rows[0];exigir_(h.length<=ESQUEMA_[n].length&&h.every((k,i)=>k===ESQUEMA_[n][i]),'Encabezados incompatibles en '+n+'. No se migró la base.');existentes[n]=rows;});
+  props.setProperty('SPREADSHEET_ID',ss.getId());ss.setSpreadsheetTimeZone(TZ_);
+  Object.keys(ESQUEMA_).forEach(n=>{
+   let sh=ss.getSheetByName(n);if(!sh)sh=ss.insertSheet(n);const h=ESQUEMA_[n],rows=existentes[n]||[],antes=rows.length?rows[0].length:0;
+   if(sh.getMaxColumns()<h.length)sh.insertColumnsAfter(sh.getMaxColumns(),h.length-sh.getMaxColumns());
+   if(antes<h.length){
+    sh.getRange(1,antes+1,1,h.length-antes).setValues([h.slice(antes)]);
+    if(rows.length>1)sh.getRange(2,antes+1,rows.length-1,h.length-antes).setValues(rows.slice(1).map(r=>h.slice(antes).map(k=>{
+     if(k==='necesariaEvaluacion')return r[h.indexOf('principal')]===true||['AMPLIACION_MEDICA','ESPECIALISTA'].includes(r[h.indexOf('tipo')]);
+     if(k==='naturaleza')return r[h.indexOf('tipo')]==='AMPLIACION_MEDICA'?'Ampliación':r[h.indexOf('tipo')]==='ESPECIALISTA'?'Nueva pericia':'Requerimiento';
+     if(k==='evaluacionSuspendida')return false;
+     if(k==='fechaIngresoEvaluacion'&&r[h.indexOf('tipo')]==='Evaluación 308 / Desestimación')return r[h.indexOf('fechaCreacion')];return '';
+    })));
+   }
+   // Completar una migración interrumpida tras escribir encabezados, sin reemplazar valores presentes.
+   const defaults=n==='MEDIDAS'?['necesariaEvaluacion','naturaleza']:n==='TAREAS'?['evaluacionSuspendida','fechaIngresoEvaluacion']:[];
+   defaults.forEach(k=>{const idx=h.indexOf(k);if(idx>=antes||rows.length<2)return;let cambio=false;
+    const values=rows.slice(1).map(r=>{let v=r[idx];if(v!==''&&v!==undefined)return [v];
+     if(k==='necesariaEvaluacion')v=r[h.indexOf('principal')]===true||['AMPLIACION_MEDICA','ESPECIALISTA'].includes(r[h.indexOf('tipo')]);
+     if(k==='naturaleza')v=r[h.indexOf('tipo')]==='AMPLIACION_MEDICA'?'Ampliación':r[h.indexOf('tipo')]==='ESPECIALISTA'?'Nueva pericia':'Requerimiento';
+     if(k==='evaluacionSuspendida')v=false;
+     if(k==='fechaIngresoEvaluacion')v=r[h.indexOf('tipo')]==='Evaluación 308 / Desestimación'?r[h.indexOf('fechaCreacion')]:'';
+     if(v!==''&&v!==undefined)cambio=true;return [v===undefined?'':v];
+    });if(cambio)sh.getRange(2,idx+1,values.length,1).setValues(values);
+   });
+   sh.setFrozenRows(1);sh.getRange(1,1,1,h.length).setBackground('#17384d').setFontColor('#ffffff').setFontWeight('bold');
+   if(n!=='CONFIGURACION')h.forEach((k,i)=>{if(/fecha|hora|Alerta|oracPrimera|oracSegunda|oracDevolucion|oracReiteracion|oracFecha/i.test(k))sh.getRange(2,i+1,Math.max(1,sh.getMaxRows()-1),1).setNumberFormat('@');});
+  });
+  const db=leerDb_(),prev=JSON.parse(JSON.stringify(db));
+  Object.keys(PLAZOS_).forEach(k=>{if(!db.CONFIGURACION.some(r=>r.clave===k))db.CONFIGURACION.push({clave:k,dias:PLAZOS_[k],descripcion:/PREVENTIVA/.test(k)?'Días de anticipación a la conservación de referencia':'Días corridos'});});
+  // Corregir madurez legada conservando dictámenes, fechas válidas e historial.
+  const config=config_(db);db.CAUSAS.forEach(c=>{
+   const antes=JSON.stringify(c);sincronizarEvaluacion_(db,c,'Sistema · migración',config);
+   if(JSON.stringify(c)!==antes){tocar_(c,'Sistema · migración');registrar_(db,'Sistema · migración',c,'','Migración','Revisión de madurez y evaluación; no se eliminaron registros.');}
+  });
+  guardarDb_(prev,db);return 'Base inicializada / migrada sin borrado. '+ss.getUrl();
+ });
+}
+
+/** Casos de uso. Se ejecutan sobre un snapshot dentro del ScriptLock. */
+function nuevaMedida_(db,c,p,u,config) {
+ const descripcion=texto_(p.descripcion||'',500);exigir_(descripcion,'Describa la medida.');
+ const organismo=texto_(p.organismo||'',200);exigir_(organismo,'Indique organismo.');
+ const fecha=fecha_(p.fechaSolicitud||hoy_());exigir_(fecha<=hoy_(),'La solicitud no puede ser futura.');
+ const plazo=Number(p.plazo);exigir_(Number.isInteger(plazo)&&plazo>=0&&plazo<=3650,'Plazo inválido.');
+ const tipo=texto_(p.tipo||'PERSONALIZADA',80);
+ if(['FECHA_MEDICA','DICTAMEN_MEDICO'].includes(tipo))exigir_(c.tipo==='Mala praxis'&&c.datos.documentacionReunida&&documentacionLista_(c.datos),'Complete la documentación antes de solicitar pericia médica.');
+ const naturaleza=p.naturaleza||(['AMPLIACION_MEDICA','ESPECIALISTA'].includes(tipo)?(tipo==='AMPLIACION_MEDICA'?'Ampliación':'Nueva pericia'):'Requerimiento');exigir_(['Requerimiento','Ampliación','Nueva pericia'].includes(naturaleza),'Naturaleza inválida.');
+ if(c.estado==='Cerrada'){c.estado='En seguimiento';registrar_(db,u,c,'','Cambio de estado','Reapertura por nueva medida.');}
+ const m={id:id_(),causaId:c.id,tipo,descripcion,organismo,estado:'Solicitada',fechaSolicitud:fecha,plazo,primeraAlerta:sumarDias_(fecha,plazo),fechaReiteracion:'',segundaAlerta:'',fechaRecepcion:'',principal:p.principal===true,ultimaUsuaria:u,version:1,sugerenciaClave:p.clave||'',necesariaEvaluacion:p.necesariaEvaluacion===true||naturaleza==='Nueva pericia'||p.principal===true||['AMPLIACION_MEDICA','ESPECIALISTA'].includes(tipo),naturaleza};
+ db.MEDIDAS.push(m);registrar_(db,u,c,m.id,'Medida solicitada',naturaleza+' · '+descripcion);
+ if(['FECHA_MEDICA','FECHA_ACCIDENTOLOGICA'].includes(tipo)) c.periciaEstado='Fecha solicitada';
+ if(c.tipo==='Mala praxis'&&['AMPLIACION_MEDICA','ESPECIALISTA'].includes(tipo))c.datos[tipo==='AMPLIACION_MEDICA'?'ampliacion':'especialista']='Solicitada';
+ return m;
+}
+function nuevaTarea_(db,c,p,u,config) {
+ const t={id:id_(),causaId:c.id,tipo:p.tipo,descripcion:texto_(p.descripcion,500),estado:'Pendiente',fechaCreacion:p.fechaCreacion||hoy_(),fechaAudiencia:fecha_(p.fechaAudiencia,true),primeraAlerta:p.tipo==='Evaluación 308 / Desestimación'?sumarDias_(p.fechaCreacion||hoy_(),config.EVALUACION):'',fechaReiteracion:'',segundaAlerta:p.tipo==='Evaluación 308 / Desestimación'?sumarDias_(sumarDias_(p.fechaCreacion||hoy_(),config.EVALUACION),config.SEGUNDA_ALERTA):'',fechaCumplida:'',ultimaUsuaria:u,version:1,sugerenciaClave:p.clave||'',evaluacionSuspendida:false,fechaIngresoEvaluacion:p.tipo==='Evaluación 308 / Desestimación'?(p.fechaCreacion||hoy_()):'',horaAudiencia:hora_(p.horaAudiencia||''),testigoId:p.testigoId||''};
+ db.TAREAS.push(t);registrar_(db,u,c,t.id,'Alta de tarea',t.descripcion);return t;
+}
+/** Único punto de activación, suspensión y reactivación de evaluación. No duplica tareas. */
+function sincronizarEvaluacion_(db,c,u,config,fecha,reactivar) {
+ const ms=db.MEDIDAS.filter(m=>m.causaId===c.id),madurez=madurez_(c,ms);
+ const ts=db.TAREAS.filter(t=>t.causaId===c.id&&t.tipo==='Evaluación 308 / Desestimación');
+ let t=ts.find(t=>t.estado==='Pendiente')||ts[ts.length-1];
+ c.principalRecibida=madurez.recibida;
+ if(!madurez.madura) {
+  if(t&&t.estado==='Pendiente'&&!t.evaluacionSuspendida){t.evaluacionSuspendida=true;tocar_(t,u);registrar_(db,u,c,t.id,'Evaluación suspendida','Prueba principal o complementaria necesaria pendiente.');}
+  c.evaluacionPendiente=false;if(c.estado==='Evaluación 308 / Desestimación')c.estado='En seguimiento';return;
+ }
+ if(t&&t.estado==='Cumplida'&&!reactivar){c.evaluacionPendiente=false;return;}
+ const ingreso=[fecha||madurez.fecha,madurez.fecha].sort().pop();
+ if(!t)t=nuevaTarea_(db,c,{tipo:'Evaluación 308 / Desestimación',descripcion:'Pendiente de evaluación para 308 / Desestimación',fechaCreacion:ingreso},u,config);
+ else if(t.evaluacionSuspendida||t.estado==='Cumplida'){
+  t.estado='Pendiente';t.evaluacionSuspendida=false;t.fechaIngresoEvaluacion=ingreso;t.primeraAlerta=sumarDias_(ingreso,config.EVALUACION);t.segundaAlerta=sumarDias_(t.primeraAlerta,config.SEGUNDA_ALERTA);t.fechaReiteracion='';t.fechaCumplida='';tocar_(t,u);registrar_(db,u,c,t.id,'Evaluación reactivada','Nuevo ingreso a evaluación: '+ingreso+'; documentación necesaria recibida.');
+ }
+ c.evaluacionPendiente=true;c.estado='Evaluación 308 / Desestimación';
+}
+function asegurarEvaluacion_(db,c,u,config,fecha) {sincronizarEvaluacion_(db,c,u,config,fecha,true);}
+function ficha_(db,id,config) {
+ const c=obtener_(db.CAUSAS,id),h=hoy_();
+ return {causa:Object.assign({},c,{oracAlerta:alerta_(c,'orac',h,config),camarasAlerta:alertaCamaras_(c,h,config)}),medidas:db.MEDIDAS.filter(m=>m.causaId===id).map(m=>Object.assign({},m,{alerta:alerta_(m,'medida',h,config)})),tareas:db.TAREAS.filter(t=>t.causaId===id).map(t=>Object.assign({},t,{alerta:alerta_(t,'tarea',h,config)})),sugerencias:sugerenciasNuevas_(db,c,config),madurez:madurez_(c,db.MEDIDAS.filter(m=>m.causaId===id)),bitacora:db.BITACORA.filter(b=>b.causaId===id).reverse()};
+}
+function confirmar_(db,p,u,config) {
+ const limpio=validarCausa_(p.causa);
+ exigir_(!db.CAUSAS.some(c=>c.ipp===limpio.ipp),'Ya existe una causa con esa IPP. No se duplicó el despacho.');
+ const c=Object.assign(limpio,{id:id_(),potencial:potencial_(limpio),principalRecibida:false,evaluacionPendiente:false,estado:'En seguimiento',fechaAlta:hoy_(),usuariaAlta:u,periciaEstado:limpio.tipo==='Otros'?'No aplica':'Sin iniciar',periciaFecha:'',oracEstado:'',oracFecha:'',oracReiteracion:'',oracSegunda:'',oracDevolucion:'',oracPrimera:'',version:1,ultimaUsuaria:u});
+ exigir_(Array.isArray(p.claves)&&p.claves.length<=150,'Selección inválida.');
+ const sugeridas=sugerencias_(c,config);exigir_(p.claves.every(k=>sugeridas.some(s=>s.clave===k)),'Las sugerencias cambiaron. Revise nuevamente.');
+ const fecha=fecha_(p.fechaSolicitud);exigir_(fecha<=hoy_(),'Fecha de solicitud futura.');
+ db.CAUSAS.push(c);registrar_(db,u,c,'','Alta','Confirmación de despacho y activación del seguimiento.');
+ sugeridas.filter(s=>p.claves.includes(s.clave)).forEach(s=>{
+  if(s.clase==='tarea') nuevaTarea_(db,c,s,u,config);
+  else nuevaMedida_(db,c,Object.assign({},s,{fechaSolicitud:fecha}),u,config);
+ });
+ exigir_(Array.isArray(p.manuales)&&p.manuales.length<=50,'Medidas manuales inválidas.');
+ p.manuales.forEach(m=>{exigir_(TIPOS_MEDIDA_.includes(m.tipo||'PERSONALIZADA'),'Tipo de medida inválido.');nuevaMedida_(db,c,m,u,config);});
+ sincronizarEvaluacion_(db,c,u,config);return ficha_(db,c.id,config);
+}
+function editar_(db,p,u,config) {
+ const c=obtener_(db.CAUSAS,p.id);version_(c,p.version);const nuevo=validarCausa_(p.causa);
+ exigir_(c.tipo===nuevo.tipo,'El tipo de investigación no puede cambiar luego de activar seguimiento.');
+ exigir_(!db.CAUSAS.some(x=>x.id!==c.id&&x.ipp===nuevo.ipp),'Ya existe otra causa con esa IPP.');
+ const cambios=Object.keys(nuevo).filter(k=>k!=='datos'&&JSON.stringify(c[k])!==JSON.stringify(nuevo[k]));Object.keys(nuevo.datos).forEach(k=>{if(JSON.stringify(c.datos[k])!==JSON.stringify(nuevo.datos[k]))cambios.push('datos.'+k);});
+ Object.assign(c,nuevo,{potencial:potencial_(nuevo)});tocar_(c,u);
+ registrar_(db,u,c,'','Edición','Campos modificados: '+(cambios.join(', ')||'sin cambios'));
+ if(c.tipo==='Mala praxis' && c.datos.documentacionReunida && c.periciaEstado==='Sin iniciar') registrar_(db,u,c,'','Cambio de estado','Documentación reunida; disponible solicitar fecha de pericia médica.');
+ // Solo se actualizan datos y madurez. Ninguna medida ordenada se modifica desde el triaje.
+ sincronizarEvaluacion_(db,c,u,config,hoy_());
+ return ficha_(db,c.id,config);
+}
+function estadoMedida_(db,p,u,config) {
+ const m=obtener_(db.MEDIDAS,p.id);version_(m,p.version);const c=obtener_(db.CAUSAS,m.causaId);
+ exigir_(MED_ESTADOS_.includes(p.estado),'Estado de medida inválido.');
+ const fecha=fecha_(p.fecha||hoy_());exigir_(fecha<=hoy_(),'La gestión no puede ser futura.');
+ exigir_(fecha>=m.fechaSolicitud,'La gestión no puede ser anterior a la solicitud.');
+ if(p.estado==='Reiterada') {exigir_(!TERMINALES_.includes(m.estado),'La medida ya está cerrada.');exigir_(!m.fechaReiteracion||fecha>=m.fechaReiteracion,'Reiteración anterior a la última gestión.');m.fechaReiteracion=fecha;m.segundaAlerta=sumarDias_(fecha,config.SEGUNDA_ALERTA);}
+ if(p.estado==='Recibida') {
+  if(['FECHA_MEDICA','FECHA_ACCIDENTOLOGICA'].includes(m.tipo)) {c.periciaFecha=fecha_(p.fechaPericia);c.periciaEstado='Fecha otorgada';}
+  m.fechaRecepcion=fecha;
+  if(['DICTAMEN_MEDICO','DICTAMEN_ACCIDENTOLOGICO'].includes(m.tipo)) c.periciaEstado='Dictamen recibido';
+
+
+ } else if(m.estado==='Recibida') {m.fechaRecepcion='';if(['DICTAMEN_MEDICO','DICTAMEN_ACCIDENTOLOGICO'].includes(m.tipo)&&!TERMINALES_.includes(p.estado))c.periciaEstado='Pericia realizada / dictamen pendiente';}
+ if(TERMINALES_.includes(m.estado)&&!TERMINALES_.includes(p.estado)){m.fechaReiteracion='';m.segundaAlerta='';}
+ m.estado=p.estado;
+ if(c.tipo==='Mala praxis'&&['AMPLIACION_MEDICA','ESPECIALISTA'].includes(m.tipo)) {const pendientes=db.MEDIDAS.some(x=>x.causaId===c.id&&x.tipo===m.tipo&&!TERMINALES_.includes(x.estado));c.datos[m.tipo==='AMPLIACION_MEDICA'?'ampliacion':'especialista']=pendientes?'Solicitada':db.MEDIDAS.some(x=>x.causaId===c.id&&x.tipo===m.tipo&&x.estado==='Recibida')?'Recibida':'No corresponde';}
+ if(m.tipo==='CAMARAS'&&p.estado==='Recibida'){c.datos.camaras='Recibidas';c.datos.preservacion='Videofilmaciones recibidas';if(!c.datos.utilidad)c.datos.utilidad='No permiten determinar claramente la mecánica';c.potencial=potencial_(c);}
+ sincronizarEvaluacion_(db,c,u,config,fecha,p.estado==='Recibida');
+ tocar_(m,u);tocar_(c,u);registrar_(db,u,c,m.id,p.estado==='Recibida'?'Recepción':p.estado==='Reiterada'?'Reiteración':'Cambio de estado',m.descripcion+' → '+p.estado);
+ return ficha_(db,c.id,config);
+}
+function tarea_(db,p,u,config) {
+ const t=obtener_(db.TAREAS,p.id);version_(t,p.version);const c=obtener_(db.CAUSAS,t.causaId);
+ if(p.operacion==='reiterar') {
+  exigir_(t.estado==='Pendiente'&&!t.evaluacionSuspendida&&t.tipo==='Evaluación 308 / Desestimación','La tarea no admite reiteración.');
+  const fecha=fecha_(p.fecha||hoy_());exigir_(fecha<=hoy_()&&fecha>=(t.fechaIngresoEvaluacion||t.fechaCreacion)&&(!t.fechaReiteracion||fecha>=t.fechaReiteracion),'Fecha de gestión inválida.');
+  t.fechaReiteracion=fecha;t.segundaAlerta=sumarDias_(fecha,config.SEGUNDA_ALERTA);registrar_(db,u,c,t.id,'Reiteración','Control de evaluación.');
+ } else if(p.operacion==='fecha') {exigir_(t.tipo==='Audiencia testimonial','No es una audiencia.');t.fechaAudiencia=fecha_(p.fecha);t.horaAudiencia=hora_(p.hora||'');const testigo=(c.datos.listaTestigos||[]).find(x=>x.id===t.testigoId);if(testigo){testigo.fecha=t.fechaAudiencia;testigo.hora=t.horaAudiencia;testigo.estado='Audiencia designada';}registrar_(db,u,c,t.id,'Edición','Fecha de audiencia: '+t.fechaAudiencia);}
+ else {
+  exigir_(['Pendiente','Cumplida'].includes(p.estado),'Estado de tarea inválido.');
+  if(t.tipo==='Evaluación 308 / Desestimación') {
+   if(p.estado==='Cumplida') {
+    exigir_(!t.evaluacionSuspendida&&madurez_(c,db.MEDIDAS.filter(m=>m.causaId===c.id)).madura,'Hay prueba principal o complementaria necesaria pendiente. No puede finalizarse la evaluación.');
+    exigir_(['En seguimiento','Cerrada'].includes(p.estadoCausa),'Seleccione estado posterior de la causa.');
+    if(p.estadoCausa==='Cerrada') exigir_(!db.MEDIDAS.some(m=>m.causaId===c.id&&!TERMINALES_.includes(m.estado))&&!db.TAREAS.some(x=>x.causaId===c.id&&x.id!==t.id&&x.estado==='Pendiente')&&(!c.oracEstado||c.oracEstado==='Devuelta'),'Hay medidas, tareas u ORAC pendientes. Mantenga la causa en seguimiento.');
+    c.evaluacionPendiente=false;c.estado=p.estadoCausa;
+   } else {exigir_(madurez_(c,db.MEDIDAS.filter(m=>m.causaId===c.id)).madura,'La causa no está madura para evaluación.');c.evaluacionPendiente=true;c.estado='Evaluación 308 / Desestimación';}
+  }
+  if(t.tipo==='Audiencia testimonial'&&t.testigoId){const testigo=(c.datos.listaTestigos||[]).find(x=>x.id===t.testigoId);if(testigo)testigo.estado=p.estado==='Cumplida'?'Declaración recibida':t.fechaAudiencia?'Audiencia designada':'Individualizado';}
+  t.estado=p.estado;t.fechaCumplida=p.estado==='Cumplida'?hoy_():'';registrar_(db,u,c,t.id,'Evaluación / tarea',t.tipo+' → '+p.estado);
+ }
+ tocar_(t,u);tocar_(c,u);return ficha_(db,c.id,config);
+}
+function pericia_(db,p,u,config) {
+ const c=obtener_(db.CAUSAS,p.id);version_(c,p.version);exigir_(c.tipo!=='Otros','En Otros seleccione una medida principal.');
+ const medica=c.tipo==='Mala praxis', tipoFecha=medica?'FECHA_MEDICA':'FECHA_ACCIDENTOLOGICA',tipoDictamen=medica?'DICTAMEN_MEDICO':'DICTAMEN_ACCIDENTOLOGICO';
+ if(p.paso==='solicitar') {
+  exigir_(c.periciaEstado==='Sin iniciar','La pericia ya fue iniciada.');
+  if(medica) exigir_(c.datos.documentacionReunida&&documentacionLista_(c.datos),'Complete la documentación y marque documentación reunida en Editar causa.');
+  nuevaMedida_(db,c,{tipo:tipoFecha,descripcion:'Solicitar fecha de pericia '+(medica?'médica.':'accidentológica.'),organismo:medica?'Asesoría Pericial':'Policía Científica',plazo:config[tipoFecha]},u,config);
+ } else if(p.paso==='fecha') {
+  exigir_(['Fecha solicitada','Fecha otorgada'].includes(c.periciaEstado),'Solicite fecha primero.');c.periciaFecha=fecha_(p.fecha);c.periciaEstado='Fecha otorgada';
+  db.MEDIDAS.filter(m=>m.causaId===c.id&&m.tipo===tipoFecha&&!TERMINALES_.includes(m.estado)).forEach(m=>{m.estado='Recibida';m.fechaRecepcion=hoy_();tocar_(m,u);registrar_(db,u,c,m.id,'Recepción','Fecha de pericia otorgada: '+c.periciaFecha);});
+ } else if(p.paso==='designar') {exigir_(c.periciaEstado==='Fecha otorgada','Registre fecha otorgada.');c.periciaEstado='Pericia designada';}
+ else if(p.paso==='realizada') {
+  exigir_(c.periciaEstado==='Pericia designada','Designe pericia primero.');const fecha=fecha_(p.fecha||hoy_());exigir_(fecha<=hoy_(),'La pericia realizada no puede ser futura.');
+  c.periciaEstado='Pericia realizada / dictamen pendiente';
+  nuevaMedida_(db,c,{tipo:tipoDictamen,descripcion:'Requerir dictamen '+(medica?'médico.':'accidentológico.'),organismo:medica?'Asesoría Pericial':'Policía Científica',plazo:config[tipoDictamen],fechaSolicitud:fecha,principal:true},u,config);
+ } else throw new Error('Paso de pericia inválido.');
+ tocar_(c,u);registrar_(db,u,c,'','Cambio de estado','Pericia: '+c.periciaEstado);return ficha_(db,c.id,config);
+}
+function orac_(db,p,u,config) {
+ const c=obtener_(db.CAUSAS,p.id);version_(c,p.version);
+ exigir_(c.tipo==='Tránsito','ORAC disponible en Tránsito.');
+ const fecha=fecha_(p.fecha||hoy_());exigir_(fecha<=hoy_(),'Fecha futura no permitida.');
+ if(p.operacion==='remitir') {
+  exigir_(c.potencial==='Identificado','La remisión requiere potencial investigativo identificado.');exigir_(p.consentimiento===true,'Confirme consentimiento de la/s víctima/s.');exigir_(!c.oracEstado||c.oracEstado==='Devuelta','La causa ya está en ORAC.');
+  c.oracEstado='Remitida';c.oracFecha=fecha;c.oracPrimera=sumarDias_(fecha,config.ORAC);c.oracReiteracion='';c.oracSegunda='';c.oracDevolucion='';
+ } else {
+  exigir_(c.oracEstado&&c.oracEstado!=='Devuelta','La causa no está pendiente en ORAC.');exigir_(fecha>=c.oracFecha,'Fecha anterior a la remisión.');
+  if(p.operacion==='reiterar') {exigir_(!c.oracReiteracion||fecha>=c.oracReiteracion,'Fecha anterior a la última gestión.');c.oracReiteracion=fecha;c.oracSegunda=sumarDias_(fecha,config.SEGUNDA_ALERTA);}
+  else if(p.operacion==='tramite') c.oracEstado='En trámite';
+  else if(p.operacion==='devolver') {c.oracEstado='Devuelta';c.oracDevolucion=fecha;}
+  else throw new Error('Acción ORAC inválida.');
+ }
+ tocar_(c,u);registrar_(db,u,c,'','ORAC',p.operacion+' · '+fecha+(p.operacion==='remitir'?' · consentimiento confirmado':''));return ficha_(db,c.id,config);
+}
+function eliminar_(db,p,u) {
+ const c=obtener_(db.CAUSAS,p.id);version_(c,p.version);
+ exigir_(p.confirmacion===c.ipp,'La IPP de confirmación no coincide.');
+ registrar_(db,u,c,'','Eliminación','Eliminación definitiva confirmada.');
+ // Se cumple la eliminación de toda la bitácora asociada solicitada. No queda auditoría residual.
+ ['CAUSAS','MEDIDAS','TAREAS','BITACORA'].forEach(n=>{db[n]=db[n].filter(x=>n==='CAUSAS'?x.id!==c.id:x.causaId!==c.id);});
+ return {eliminada:true};
+}
+
+function confirmarNuevas_(db,p,u,config) {
+ const c=obtener_(db.CAUSAS,p.id);version_(c,p.version);
+ const candidatas=sugerenciasNuevas_(db,c,config);
+ exigir_(Array.isArray(p.claves)&&p.claves.length<=150&&new Set(p.claves).size===p.claves.length,'Selección inválida.');
+ exigir_(p.claves.every(k=>candidatas.some(s=>s.clave===k)),'Las sugerencias cambiaron o ya fueron ordenadas. Actualice la ficha.');
+ const fecha=fecha_(p.fechaSolicitud);exigir_(fecha<=hoy_(),'Fecha de solicitud futura.');
+ candidatas.filter(s=>p.claves.includes(s.clave)).forEach(s=>s.clase==='tarea'?nuevaTarea_(db,c,s,u,config):nuevaMedida_(db,c,Object.assign({},s,{fechaSolicitud:fecha}),u,config));
+ registrar_(db,u,c,'','Triaje posterior confirmado',p.claves.length+' diligencias confirmadas; '+(candidatas.length-p.claves.length)+' descartadas en esta revisión.');
+ sincronizarEvaluacion_(db,c,u,config,fecha);tocar_(c,u);return ficha_(db,c.id,config);
+}
+
+function rolMedida_(db,p,u,config) {
+ const m=obtener_(db.MEDIDAS,p.id);version_(m,p.version);const c=obtener_(db.CAUSAS,m.causaId);
+ const original=['DICTAMEN_MEDICO','DICTAMEN_ACCIDENTOLOGICO'].includes(m.tipo);
+ m.principal=original||p.principal===true;m.necesariaEvaluacion=m.principal||p.necesariaEvaluacion===true||['AMPLIACION_MEDICA','ESPECIALISTA'].includes(m.tipo);
+ tocar_(m,u);registrar_(db,u,c,m.id,'Rol probatorio','Principal: '+m.principal+'; necesaria para evaluación: '+m.necesariaEvaluacion);
+ sincronizarEvaluacion_(db,c,u,config,hoy_());tocar_(c,u);return ficha_(db,c.id,config);
+}
+
+/** Única entrada RPC del cliente. No acepta ni persiste texto de despacho. */
+function doGet() {
+ return HtmlService.createTemplateFromFile('Index').evaluate().setTitle('UFIJ N.º 22 · Triaje y prueba').addMetaTag('viewport','width=device-width, initial-scale=1');
+}
+function incluir_(nombre) {return HtmlService.createHtmlOutputFromFile(nombre).getContent();}
+function api(p) {
+ exigir_(p&&typeof p==='object','Solicitud inválida.');
+ const u=identidad_(p.usuaria);
+ return conBloqueo_(()=>{
+  if(p.accion==='bitacora')return paginaBitacora_(texto_(p.id,100),p.hasta);
+  const db=leerDb_({omitirBitacora:p.accion!=='eliminar'}),config=config_(db);
+  if(p.accion==='inicio') return {tiposMedida:TIPOS_MEDIDA_,usuarias:USUARIAS_,campos:CAMPOS_,estados:ESTADOS_,estadosMedida:MED_ESTADOS_,config,hoy:hoy_(),tablero:tablero_(db,{},hoy_(),config)};
+  if(p.accion==='tablero') return tablero_(db,p.filtros,hoy_(),config);
+  if(p.accion==='ficha') return ficha_(db,p.id,config);
+  if(p.accion==='analizar') {const c=validarCausa_(p.causa);return {potencial:potencial_(c),sugerencias:sugerencias_(c,config),camarasAlerta:alertaCamaras_(c,hoy_(),config)};}
+  const prev=JSON.parse(JSON.stringify(db));let r;
+  switch(p.accion) {
+   case 'confirmar':r=confirmar_(db,p,u,config);break;
+   case 'editar':r=editar_(db,p,u,config);break;
+   case 'confirmarNuevas':r=confirmarNuevas_(db,p,u,config);break;
+   case 'agregarMedida': {const c=obtener_(db.CAUSAS,p.id);version_(c,p.version);exigir_(TIPOS_MEDIDA_.includes(p.medida.tipo||'PERSONALIZADA'),'Tipo de medida inválido.');nuevaMedida_(db,c,p.medida,u,config);sincronizarEvaluacion_(db,c,u,config,hoy_());tocar_(c,u);r=ficha_(db,c.id,config);break;}
+   case 'rolMedida':r=rolMedida_(db,p,u,config);break;
+   case 'estadoMedida':r=estadoMedida_(db,p,u,config);break;
+   case 'tarea':r=tarea_(db,p,u,config);break;
+   case 'agregarTarea': {const c=obtener_(db.CAUSAS,p.id);version_(c,p.version);exigir_(['Acta de apertura','Audiencia testimonial','Otra'].includes(p.tarea.tipo),'Tipo de tarea inválido.');nuevaTarea_(db,c,p.tarea,u,config);tocar_(c,u);r=ficha_(db,c.id,config);break;}
+   case 'pericia':r=pericia_(db,p,u,config);break;
+   case 'orac':r=orac_(db,p,u,config);break;
+   case 'estadoCausa': {const c=obtener_(db.CAUSAS,p.id);version_(c,p.version);exigir_(['En seguimiento','Cerrada'].includes(p.estado),'Estado inválido.');exigir_(!c.evaluacionPendiente,'Cierre la tarea de evaluación desde la ficha.');if(p.estado==='Cerrada'&&c.tipo==='Mala praxis') exigir_(madurez_(c,db.MEDIDAS.filter(m=>m.causaId===c.id)).madura,'La investigación por mala praxis requiere dictamen médico y complementarias recibidas antes del cierre.');if(p.estado==='Cerrada') exigir_(!db.MEDIDAS.some(m=>m.causaId===c.id&&!TERMINALES_.includes(m.estado))&&!db.TAREAS.some(t=>t.causaId===c.id&&t.estado==='Pendiente')&&(!c.oracEstado||c.oracEstado==='Devuelta'),'Hay medidas, tareas u ORAC pendientes.');c.estado=p.estado;tocar_(c,u);registrar_(db,u,c,'','Cambio de estado',p.estado);r=ficha_(db,c.id,config);break;}
+   case 'eliminar':r=eliminar_(db,p,u);break;
+   default:throw new Error('Operación no permitida.');
+  }
+  guardarDb_(prev,db);return r;
+ });
+}
+
+/** Solo datos inventados. Ejecutar desde editor en una base VACÍA de demostración. */
+function datosFicticios_() {
+ return conBloqueo_(()=>{
+  const db=leerDb_(),prev=JSON.parse(JSON.stringify(db)),config=config_(db),u=USUARIAS_[0],h=hoy_(),antes=n=>sumarDias_(new Date(new Date(h+'T12:00:00Z').getTime()-n*86400000).toISOString().slice(0,10),0);
+  exigir_(!db.CAUSAS.length&&!db.MEDIDAS.length&&!db.TAREAS.length,'Los datos ficticios solo pueden cargarse en una base vacía.');
+  const base={fechaHecho:antes(50),fechaSumario:antes(45),instructora:u,resultado:'Lesiones culposas',dato:'DATOS FICTICIOS — caso de demostración, sin personas reales.'};
+  const transito={victima:'Insta',fuga:'No',camaras:'Recibidas',utilidad:'Muestran el hecho',cientifica:'Intervino',testigos:'Sí',listaTestigos:[{nombre:'Testigo Ficticio Alfa',telefono:'',fecha:''}],rml:'No incorporado',historia:'Solicitar'};
+  const mp={victima:'Insta',historia:'No incorporada',autopsia:'No corresponde',anatomia:'No corresponde',complementaria:'Pendiente de requerir',profesionales:'No identificados',declaracion:'Pendiente',ampliacion:'No corresponde',especialista:'No corresponde',documentacionReunida:false};
+  const otros={victima:'Insta',camaras:'Solicitadas',cientifica:'No surge',testigos:'Pendientes de individualización',rml:'No incorporado',inspeccion:'Pendiente',tecnica:'Solicitar'};
+  const casos=[
+   Object.assign({},base,{ipp:'FICTICIA-TRANSITO-001',tipo:'Tránsito',datos:transito}),
+   Object.assign({},base,{ipp:'FICTICIA-MEDICA-002',instructora:USUARIAS_[1],tipo:'Mala praxis',datos:mp}),
+   Object.assign({},base,{ipp:'FICTICIA-OTROS-003',instructora:USUARIAS_[2],tipo:'Otros',principalTipo:'Informe técnico',datos:otros}),
+   Object.assign({},base,{ipp:'FICTICIA-LIMITADA-004',instructora:USUARIAS_[3],tipo:'Tránsito',datos:Object.assign({},transito,{camaras:'No hay / no se localizaron',cientifica:'No intervino',testigos:'No',rml:'Incorporado',historia:'No corresponde'})}),
+   Object.assign({},base,{ipp:'FICTICIA-ORAC-005',instructora:USUARIAS_[4],tipo:'Tránsito',datos:Object.assign({},transito,{testigos:'No',rml:'Incorporado',historia:'No corresponde'})})
+  ];
+  const creadas=casos.map(c=>{const limpia=validarCausa_(c);return confirmar_(db,{causa:c,fechaSolicitud:antes(40),claves:sugerencias_(limpia,config).map(s=>s.clave),manuales:[]},u,config).causa;});
+  let c=obtener_(db.CAUSAS,creadas[0].id);
+  pericia_(db,{id:c.id,version:c.version,paso:'fecha',fecha:antes(25)},u,config);
+  pericia_(db,{id:c.id,version:c.version,paso:'designar'},u,config);
+  pericia_(db,{id:c.id,version:c.version,paso:'realizada',fecha:antes(24)},u,config);
+  const dictamen=db.MEDIDAS.find(m=>m.causaId===c.id&&m.tipo==='DICTAMEN_ACCIDENTOLOGICO');
+  estadoMedida_(db,{id:dictamen.id,version:dictamen.version,estado:'Recibida',fecha:antes(20)},u,config);
+  const rml=db.MEDIDAS.find(m=>m.causaId===c.id&&m.tipo==='RML');
+  estadoMedida_(db,{id:rml.id,version:rml.version,estado:'Reiterada',fecha:antes(6)},u,config);
+  c=obtener_(db.CAUSAS,creadas[4].id);
+  orac_(db,{id:c.id,version:c.version,operacion:'remitir',fecha:antes(35),consentimiento:true},u,config);
+  orac_(db,{id:c.id,version:c.version,operacion:'reiterar',fecha:antes(6)},u,config);
+  // Una medida próxima al vencimiento además de las ya vencidas.
+  c=obtener_(db.CAUSAS,creadas[2].id);
+  nuevaMedida_(db,c,{descripcion:'Medida ficticia próxima a vencer.',organismo:'Organismo de demostración',fechaSolicitud:h,plazo:2},u,config);
+  guardarDb_(prev,db);return 'Se cargaron cinco causas FICTICIAS. No contienen datos reales.';
+ });
+}
+
+ const cuentas={};USUARIAS_.forEach((nombre,i)=>cuentas[nombre]='demo-'+(i+1)+'@example.invalid');
+ props.USUARIAS_EMAILS=JSON.stringify(cuentas);
+ inicializar_();datosFicticios_();
+ return p=>{emailActivo=cuentas[p.usuaria]||'';return JSON.parse(JSON.stringify(api(p)));};
+})();
+// Este puente simula la llamada a Google solo dentro de este archivo de demostración.
+window.google={script:{run:{withSuccessHandler(ok){return {withFailureHandler(fail){return {api(p){setTimeout(()=>{try{ok(servidorDemo(p));}catch(e){fail({message:e.message});}},10);}};}};}}}};
+
+</script><meta charset="UTF-8"><style>
+:root{--navy:#17384d;--ink:#1e3443;--muted:#61727f;--line:#dce3e8;--bg:#f3f6f8;--white:#fff;--blue:#235f83;--red:#a42e34;--orange:#9b5015;--yellow:#7b6518;--green:#2e7056}*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--bg);font:14px/1.5 Arial,Helvetica,sans-serif}button,input,select,textarea{font:inherit}button{padding:9px 13px;border:1px solid #c9d4dc;background:#fff;border-radius:5px;color:var(--ink);cursor:pointer;font-weight:600;min-height:38px}button:hover{background:#eaf0f4}button:disabled{opacity:.55;cursor:wait}button.primario{background:var(--navy);border-color:var(--navy);color:#fff}button.primario:hover{background:#24506b}.peligro{color:var(--red);border-color:#d7b6b8}.texto{border-color:transparent;background:transparent;color:var(--blue)}.pequeno{min-height:30px;font-size:12px;padding:5px 9px}input,select,textarea{width:100%;border:1px solid #bfcbd4;border-radius:5px;padding:10px;background:#fff;color:var(--ink);min-height:41px}textarea{resize:vertical}input[type=checkbox]{width:17px;min-height:17px;accent-color:var(--blue)}input[type=date]{min-width:0}label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600}label.check{flex-direction:row;align-items:center;font-weight:400;gap:9px}h1,h2,h3,p{margin-top:0}h1{font-size:28px;line-height:1.25;letter-spacing:-.6px}h2{font-size:21px;line-height:1.3}h3{font-size:16px;margin-bottom:16px}small,.muted{color:var(--muted)}small{font-size:12px}.eyebrow{font-size:11px;letter-spacing:1.8px;font-weight:bold}.ingreso{max-width:1100px;margin:10vh auto;display:grid;grid-template-columns:1fr 1fr;background:#fff;box-shadow:0 14px 50px #18384d12;border:1px solid var(--line);border-radius:10px;overflow:hidden}.presentacion{padding:64px 44px;background:var(--navy);color:#fff}.presentacion h1{font-size:37px;margin:28px 0}.presentacion small{color:#bdcfdc}.sello{width:65px;height:65px;border:1px solid #92aebb;border-radius:50%;font:30px Georgia,serif;display:grid;place-items:center;margin-bottom:30px}.login{padding:64px 44px;display:flex;flex-direction:column;gap:18px}.login p{margin-bottom:0}.login h2{font-size:28px;margin-bottom:0}.cabecera{background:var(--navy);color:#fff;padding:20px 4%;display:flex;align-items:center;justify-content:space-between;gap:20px}.marca{display:flex;gap:14px;align-items:center}.marca strong{font-size:16px;letter-spacing:.7px}.marca span:not(.mini-sello){display:block;font-size:10px;letter-spacing:1.3px;color:#c6d6e0;margin-top:3px}.mini-sello{border:1px solid #93acbc;border-radius:50%;width:42px;height:42px;display:grid;place-items:center;font:22px Georgia,serif}.sesion{display:flex;flex-direction:column;align-items:flex-end;font-size:13px}.sesion button{color:#d0e1ee;font-size:11px;min-height:20px;padding:0}.barra{padding:13px 4%;display:flex;align-items:center;gap:20px;background:#fff;border-bottom:1px solid var(--line)}.barra span{font-size:12px;color:var(--muted)}.crece{flex:1}main{max-width:1480px;margin:auto;padding:30px 4% 60px}.encabezado{display:flex;justify-content:space-between;align-items:start;gap:18px;margin-bottom:24px}.encabezado p{margin-bottom:0;color:var(--muted)}.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:22px 0}.kpi{background:#fff;border:1px solid var(--line);border-top:3px solid var(--line);border-radius:6px;padding:18px;text-align:left;font-weight:400;min-height:126px}.kpi strong{display:block;font-size:30px;line-height:1.15;margin-bottom:10px;color:var(--ink)}.kpi span{font-size:12px;line-height:1.4;display:block}.kpi:nth-child(1),.kpi:nth-child(3){border-top-color:#b4585c}.kpi:nth-child(2){border-top-color:#c4a85b}.kpi:nth-child(4){border-top-color:#528cac}.panel{background:#fff;border:1px solid var(--line);border-radius:7px;padding:23px;margin-bottom:20px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:17px}.filtros{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:13px}.checks{display:flex;gap:20px;flex-wrap:wrap;margin-top:16px}.seccion-titulo{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:18px}.seccion-titulo h2,.seccion-titulo h3{margin:0}.acciones{display:flex;gap:10px;justify-content:flex-end;align-items:center;margin-top:22px;flex-wrap:wrap}.tabla-scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;padding:12px 10px;background:#f5f7f9;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--line)}td{border-bottom:1px solid #e8edf0;padding:14px 10px;vertical-align:top}td .muted{font-size:11px;margin-top:5px;display:block}td .acciones{margin:0;justify-content:start;flex-wrap:nowrap}tr:last-child td{border-bottom:0}.badge{display:inline-block;border-radius:4px;padding:4px 8px;font-size:11px;font-weight:600;white-space:normal;background:#edf1f4;color:#5b6b75}.rojo{background:#fae8e9;color:#9b3037}.naranja{background:#fff0e0;color:#9b5015}.amarillo{background:#fbf5d9;color:#7b6518}.verde{background:#e8f2ed;color:#2d6b51}.azul{background:#e6f0f8;color:#245f83}.vacio{padding:32px;text-align:center;color:var(--muted)}.resumen{display:flex;gap:24px;flex-wrap:wrap}.resumen div{min-width:140px}.resumen small{display:block;margin-bottom:4px}.nota{background:#f0f5f8;border-left:3px solid #5d839c;padding:12px 15px;margin:18px 0;color:#415e70}.testigo{display:grid;grid-template-columns:2fr 1.2fr 1.2fr auto;gap:12px;align-items:end;margin:14px 0}.sugerencia{padding:13px 0;border-bottom:1px solid var(--line)}.sugerencia label{align-items:start}.sugerencia small{display:block;font-weight:400;margin-top:4px}.despacho{min-height:260px;font:14px/1.6 Georgia,serif;white-space:pre-wrap}.pasos{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0}.pasos span{background:#f0f3f6;padding:7px 10px;border-radius:4px;font-size:12px}.pasos .activo{background:var(--navy);color:#fff}footer{border-top:1px solid var(--line);padding:18px 4%;font-size:11px;color:var(--muted)}#progreso{position:fixed;top:0;left:0;width:100%;padding:5px;text-align:center;background:#dfebf4;color:#17415c;z-index:50;font-size:12px}#aviso{position:fixed;bottom:24px;right:24px;max-width:540px;padding:17px 22px;background:var(--navy);color:#fff;border-radius:6px;box-shadow:0 5px 25px #17384d30;z-index:100}#aviso.error{background:#92333b}dialog{border:1px solid var(--line);border-radius:8px;max-width:660px;width:95%;padding:26px;color:var(--ink);max-height:90vh}dialog::backdrop{background:#132e4270}dialog label{margin-bottom:15px}dialog .grid{grid-template-columns:1fr 1fr}details{margin:15px 0}summary{cursor:pointer;color:var(--blue);font-weight:600}#fechaHoy{text-transform:capitalize}.ancho{grid-column:1/-1}.leyenda{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0;font-size:11px}:focus-visible{outline:3px solid #7caac5;outline-offset:2px}[hidden]{display:none!important}@media(max-width:1100px){.kpis{grid-template-columns:repeat(3,1fr)}.filtros{grid-template-columns:repeat(3,1fr)}.barra #sync{display:none}.grid{grid-template-columns:1fr 1fr}}@media(max-width:650px){.ingreso{margin:0;border:0;border-radius:0;grid-template-columns:1fr}.presentacion{padding:28px}.presentacion h1{font-size:28px;margin:15px 0}.sello{display:none}.login{padding:30px}.cabecera{padding:18px;align-items:start}.marca strong{font-size:12px}.marca span:not(.mini-sello){font-size:8px;max-width:180px}.mini-sello{display:none}.sesion{font-size:11px}.barra{padding:10px 14px;gap:6px;flex-wrap:wrap}.barra #fechaHoy{display:none}.barra button{font-size:12px}main{padding:22px 14px}.encabezado{flex-direction:column}h1{font-size:24px}.kpis{grid-template-columns:1fr 1fr;gap:8px}.kpi{padding:13px;min-height:110px}.grid,.filtros,dialog .grid{grid-template-columns:1fr}.testigo{grid-template-columns:1fr 1fr}.panel{padding:17px}.resumen{gap:15px}#aviso{left:15px;right:15px;bottom:15px}.acciones button{flex-grow:1}dialog{padding:20px}.barra .crece{display:none}}
+@media print{.cabecera,.barra,footer,button,#ingreso{display:none!important}main{padding:0}.panel{break-inside:avoid}}
+</style>
+<style>
+/* Se conservan la paleta y las tarjetas de la primera versión. */
+.panel-evaluacion{border-left:4px solid #39789e;background:#fbfdff}.panel-evaluacion h2{font-size:17px;color:#235f83}.testigo{grid-template-columns:repeat(3,minmax(0,1fr));padding:15px 0;border-bottom:1px solid var(--line)}.kpis{grid-template-columns:repeat(7,minmax(0,1fr))}.paginacion{display:flex;gap:12px;align-items:center;justify-content:flex-end;margin:15px 0;color:var(--muted);font-size:12px}@media(max-width:1100px){.kpis{grid-template-columns:repeat(3,1fr)}}@media(max-width:650px){.kpis{grid-template-columns:repeat(2,1fr)}.testigo{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body><aside style="padding:12px 4%;background:#fff3d8;color:#594719;border-bottom:1px solid #dfcc9b;font:14px/1.5 Arial,sans-serif"><strong>VISTA PREVIA · SOLO DATOS FICTICIOS</strong><br>Podés recorrer las pantallas y probar operaciones. Los cambios se pierden al recargar. La cuenta Google es simulada; este archivo no accede a Google Sheets ni reemplaza la aplicación institucional.</aside>
+<section id="ingreso" class="ingreso">
+ <div class="presentacion"><div class="sello" aria-hidden="true">22</div><p class="eyebrow">MINISTERIO PÚBLICO · QUILMES</p><h1>Gestión de prueba.<br>Una base compartida.</h1><p>Agente de triaje y gestión de prueba<br>UFIJ N.º 22 Quilmes</p><small>Tránsito · Mala praxis · Otros hechos culposos</small></div>
+ <form id="login" class="login"><p class="eyebrow">ACCESO DEL EQUIPO</p><h2>Bienvenida</h2><p>Seleccioná tu nombre. Debe coincidir con tu cuenta Google institucional.</p><label>Usuaria<select id="usuaria" required><option value="">Seleccionar usuaria</option><option>Rocío Albarracín</option><option>Laura Sánchez</option><option>Cecilia Attolini</option><option>Andrea Ramat</option><option>Mara Torres</option></select></label><button type="submit" class="primario">INGRESAR AL TABLERO →</button><small>La sesión se conserva en esta pestaña. Cada gestión verifica tu identidad con Google.</small></form>
+</section>
+<div id="app" hidden>
+ <header class="cabecera"><div class="marca"><span class="mini-sello">22</span><div><strong>UFIJ N.º 22 QUILMES</strong><span>AGENTE DE TRIAJE Y GESTIÓN DE PRUEBA</span></div></div><div class="sesion"><span id="sesionNombre"></span><button data-action="salir" class="texto">Cambiar usuaria</button></div></header>
+ <nav class="barra"><button data-action="tablero" class="texto">Tablero de seguimiento</button><span id="fechaHoy"></span><span class="crece"></span><span id="sync">Base compartida · Google Sheets</span><button data-action="nueva" class="primario">＋ NUEVA CAUSA</button></nav>
+ <main id="contenido"></main>
+ <footer>UFIJ N.º 22 Quilmes · Plazos en días corridos · <span id="actualizado"></span></footer>
+</div>
+<div id="progreso" hidden role="status">Procesando…</div><div id="aviso" role="status" aria-live="polite" hidden></div>
+<dialog id="dialogo"><form id="dialogForm"><div class="seccion-titulo"><h2 id="dialogTitulo"></h2><button type="button" data-action="cerrarDialogo" aria-label="Cerrar">×</button></div><div id="dialogCuerpo"></div><div class="acciones"><button type="button" data-action="cerrarDialogo">Cancelar</button><button type="submit" class="primario" id="dialogConfirmar">Confirmar</button></div></form></dialog>
+<script>
+/* Módulos jurídicos locales. Ajustar aquí la redacción sin alterar las reglas ni guardar el texto. */
+const MODULOS_DESPACHO = {
+ RML:(m)=>'Requiérase al '+m.organismo+' la realización del reconocimiento médico legal de la víctima o, si ya hubiera sido practicado, la remisión del informe correspondiente y sus constancias.',
+ CRIP:(m)=>'Requiérase a '+m.organismo+' la remisión del CRIP y de las actuaciones, relevamientos y registros producidos con motivo de su intervención en el hecho investigado.',
+ HISTORIA_CLINICA:(m)=>'Requiérase a '+m.organismo+' la remisión de la historia clínica completa de la víctima, con sus anexos, estudios, registros de atención, indicaciones y demás documentación médica vinculada con la asistencia investigada.',
+ PRESERVAR_CAMARAS:(m,c)=>'Requiérase con carácter urgente a '+m.organismo+' la preservación de las videofilmaciones que pudieran registrar el hecho del '+fmt(c.fechaHecho)+', así como la confirmación expresa de su efectivo resguardo. Solicítese que se informe su disponibilidad y el plazo de conservación aplicable, a fin de prevenir la pérdida de registros.',
+ CAMARAS:(m,c)=>'Requiérase a '+m.organismo+' la remisión de las videofilmaciones vinculadas con el hecho del '+fmt(c.fechaHecho)+', con identificación de su origen, ubicación de las cámaras y período registrado. La remisión se gestionará independientemente de la confirmación de preservación.',
+ 'Acta de apertura':()=>'Procédase a la apertura, visualización y descripción de las videofilmaciones incorporadas, labrándose acta en la que se deje constancia de los archivos examinados, su identificación y el contenido relevante para la investigación.',
+ 'Audiencia testimonial':m=>'Desígnese audiencia para recibir declaración testimonial '+(m.testigoNombre?'a '+m.testigoNombre:'a la persona indicada en la diligencia: '+m.descripcion.replace(/\.$/,''))+' conforme al art. 232 del CPPBA'+(m.fechaAudiencia?', para el día '+fmt(m.fechaAudiencia)+(m.horaAudiencia?' a las '+m.horaAudiencia+' horas':''):'; la fecha y hora se fijarán oportunamente')+'. Practíquese la citación correspondiente con los datos de contacto disponibles.',
+ FECHA_ACCIDENTOLOGICA:m=>'Requiérase a '+m.organismo+' la asignación de fecha para la realización de pericia accidentológica, a fin de examinar los elementos disponibles y establecer, en cuanto resulte técnicamente posible, la mecánica del hecho investigado.',
+ FECHA_MEDICA:m=>'Reunida y verificada la documentación médica necesaria, requiérase a '+m.organismo+' la asignación de fecha para la realización de pericia médica sobre la atención objeto de investigación. Los puntos de pericia serán revisados y establecidos por la Fiscalía.',
+ INFORME_TRANSITO:m=>'Requiérase a '+m.organismo+' un informe sobre las condiciones de circulación y demás antecedentes de tránsito pertinentes al lugar y a la fecha del hecho, acompañando la documentación y registros disponibles.',
+ INSPECCION:m=>'Requiérase a '+m.organismo+' una inspección técnica de las instalaciones, equipos o sector vinculados con el hecho, con relevamiento de las condiciones de seguridad e higiene que resulten pertinentes y documentación de los hallazgos.',
+ DOCUMENTACION_TECNICA:m=>'Requiérase a '+m.organismo+' la documentación técnica y administrativa vinculada con el hecho, incluyendo, cuando corresponda, registros de mantenimiento, controles, habilitaciones y antecedentes de seguridad e higiene.',
+ AMPLIACION_MEDICA:m=>'Requiérase a '+m.organismo+' la ampliación del dictamen médico en los aspectos que la Fiscalía individualice como pendientes de aclaración o insuficientemente desarrollados, acompañando los antecedentes necesarios.',
+ ESPECIALISTA:m=>'Requiérase a '+m.organismo+' la intervención de un profesional de la especialidad pertinente para producir el informe pericial complementario dispuesto, con los puntos y antecedentes que establezca la Fiscalía.',
+ DICTAMEN_MEDICO:m=>'Requiérase a '+m.organismo+' la remisión del dictamen correspondiente a la pericia médica realizada, junto con sus anexos y estudios complementarios.',
+ DICTAMEN_ACCIDENTOLOGICO:m=>'Requiérase a '+m.organismo+' la remisión del dictamen accidentológico correspondiente a la pericia realizada, con sus registros, anexos y conclusiones.',
+ PRINCIPAL_OTROS:(m,c)=>'Requiérase a '+m.organismo+' la producción de la prueba principal identificada como '+c.principalTipo+', con examen de los antecedentes relevantes y documentación de sus resultados.',
+ DEFUNCION:m=>'Requiérase a '+m.organismo+' la remisión del certificado de defunción correspondiente a la víctima.',
+ AUTOPSIA:m=>'Requiérase a '+m.organismo+' la remisión del protocolo de autopsia, sus anexos y estudios complementarios disponibles.',
+ ANATOMIA:m=>'Requiérase a '+m.organismo+' la remisión del informe anatomopatológico y sus constancias complementarias.'
+};
+function parrafoDiligencia_(m,c){
+ if(MODULOS_DESPACHO[m.tipo])return MODULOS_DESPACHO[m.tipo](m,c);
+ const descripcion=String(m.descripcion||'').trim().replace(/[.\s]+$/,'');
+ return descripcion+'.'+(m.clase==='tarea'?'':' A tales fines, líbrese requerimiento a '+m.organismo+'.');
+}
+function textoDespacho_(c,seleccion,fecha){
+ let texto='UFIJ N.º 22 QUILMES\nIPP '+c.ipp+'\n\nQuilmes, '+fmt(fecha)+'.\n\nPor recibido el sumario policial correspondiente a la presente IPP digital, procédase a su incorporación y, a fin de avanzar en el esclarecimiento del hecho investigado, dispónganse las siguientes diligencias:\n\n';
+ texto+=seleccion.map((m,i)=>(i+1)+'. '+parrafoDiligencia_(m,c)).join('\n\n');
+ if(!seleccion.length)texto+='No se han seleccionado diligencias para este proyecto.';
+ return texto;
+}
+function generarDespacho(){
+ const posterior=S.vista==='ficha';
+ const c=posterior?S.ficha.causa:leerCausa();
+ const seleccion=posterior?$$('[data-nueva]:checked').map(el=>S.ficha.sugerencias[Number(el.dataset.nueva)]):elegidas().concat(S.manuales);
+ $('#despacho').value=textoDespacho_(c,seleccion,$('#fechaDespacho').value);
+}
+</script>
+
+<script>
+'use strict';
+const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
+const esc=v=>String(v===undefined||v===null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=v=>v?v.split('-').reverse().join('/'):'—';
+const usuarios=['Rocío Albarracín','Laura Sánchez','Cecilia Attolini','Andrea Ramat','Mara Torres'];
+const S={usuaria:'',meta:null,tablero:null,ficha:null,vista:'tablero',editando:null,manuales:[],analisis:null,busy:false,filtros:{},revision:0,analisisRevision:-1};
+let dialogCallback=null, avisoTimer=null,consulta=0;
+function opciones(lista,valor,placeholder){return (placeholder===undefined?'':'<option value="">'+esc(placeholder)+'</option>')+lista.map(x=>'<option '+(x===valor?'selected':'')+' value="'+esc(x)+'">'+esc(x)+'</option>').join('');}
+function aviso(msg,error){$('#aviso').textContent=msg;$('#aviso').className=error?'error':'';$('#aviso').hidden=false;clearTimeout(avisoTimer);avisoTimer=setTimeout(()=>$('#aviso').hidden=true,error?14000:5000);}
+function ocupado(valor){S.busy=valor;$('#progreso').hidden=!valor;$$('button').forEach(b=>{if(valor){b.dataset.preDisabled=b.disabled?'1':'0';b.disabled=true;}else{b.disabled=b.dataset.preDisabled==='1';delete b.dataset.preDisabled;}});}
+function rpc(accion,p={},silencioso=false){
+ return new Promise((resolve,reject)=>{
+  google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>{const msg=(e&&e.message?e.message:String(e)).replace(/^Error: /,'');if(!silencioso)aviso(msg,true);reject(new Error(msg));}).api(Object.assign({},p,{accion,usuaria:S.usuaria}));
+ });
+}
+async function escritura(accion,p){if(S.busy)return;ocupado(true);try{return await rpc(accion,p);}finally{ocupado(false);}}
+async function iniciar(nombre){
+ S.usuaria=nombre;ocupado(true);
+ try{S.meta=await rpc('inicio');S.tablero=S.meta.tablero;try{sessionStorage.setItem('ufij22_demo_usuaria',nombre);}catch(e){}$('#ingreso').hidden=true;$('#app').hidden=false;$('#sesionNombre').textContent=nombre;$('#fechaHoy').textContent=new Intl.DateTimeFormat('es-AR',{dateStyle:'long',timeZone:'America/Argentina/Buenos_Aires'}).format(new Date(S.meta.hoy+'T12:00:00Z'));S.vista='tablero';renderTablero();}
+ finally{ocupado(false);}
+}
+async function actualizarTablero(silencioso=false){const n=++consulta;const r=await rpc('tablero',{filtros:S.filtros},silencioso);if(n!==consulta||S.vista!=='tablero')return;S.tablero=r;S.meta.hoy=r.hoy;renderTablero();}
+function badge(a){return '<span class="badge '+esc(a.nivel)+'">'+esc(a.texto)+'</span>';}
+function resumenMedida(m){return '<strong>'+esc(m.descripcion)+'</strong><span class="muted">'+esc(m.organismo)+' · '+esc(m.estado)+(m.principal?' · Prueba principal':'')+(m.necesariaEvaluacion?' · Necesaria para evaluación':'')+'</span>';}
+function botonesMedida(m){const cerrada=['Recibida','No corresponde','Dejada sin efecto'].includes(m.estado);return '<div class="acciones">'+(!cerrada?'<button class="pequeno" data-action="reiterar" data-id="'+m.id+'">Reiterada</button><button class="pequeno" data-action="recibir" data-id="'+m.id+'">Recibida</button>':'')+'<button class="pequeno texto" data-action="ficha" data-id="'+m.causaId+'">Abrir ficha →</button></div>';}
+function renderTablero(){
+ const t=S.tablero,f=S.filtros,porId=new Map(t.causas.map(c=>[c.id,c])),caso=id=>porId.get(id)||t.medidas.find(m=>m.causaId===id)||t.evaluaciones.find(e=>e.causaId===id),k=t.kpi;
+ const tarjetas=[['vencidas','Medidas vencidas',k.vencidas],['proximas','Medidas próximas a vencer',k.proximas],['reiteradas','Reiteradas sin respuesta',k.reiteradas],['evaluacion','Prueba principal pendiente de evaluación',k.evaluacion],['limitado','Potencial investigativo limitado',k.limitado],['orac','ORAC pendiente de devolución',k.orac],['camaras','Conservación de cámaras · alerta crítica',k.camaras]];
+ const medidas=t.medidas.filter(m=>!['Recibida','No corresponde','Dejada sin efecto'].includes(m.estado)).sort((a,b)=>{const rango={rojo:0,naranja:1,amarillo:2,verde:3,sin:4};return rango[a.alerta.nivel]-rango[b.alerta.nivel]||String(a.alerta.fecha||'').localeCompare(b.alerta.fecha||'');});
+ const alertasT=t.evaluaciones||[];
+ $('#contenido').innerHTML='<div class="encabezado"><div><p class="eyebrow">SEGUIMIENTO COMPARTIDO</p><h1>Tablero de causas</h1><p>Prioridades del equipo y próximos controles.</p></div><button data-action="actualizar">↻ Actualizar</button></div><div class="kpis">'+tarjetas.map(([id,label,n])=>'<button class="kpi" data-action="kpi" data-key="'+id+'"><strong>'+n+'</strong><span>'+label+'</span></button>').join('')+'</div>'+
+ '<section class="panel"><form id="filtros"><div class="filtros"><label>Buscar IPP<input name="ipp" type="search" placeholder="Número de IPP" value="'+esc(f.ipp||'')+'"></label><label>Instructora<select name="instructora">'+opciones(usuarios,f.instructora,'Todas')+'</select></label><label>Investigación<select name="tipo">'+opciones(Object.keys(S.meta.campos),f.tipo,'Todas')+'</select></label><label>Resultado<select name="resultado">'+opciones(['Lesiones culposas','Homicidio culposo'],f.resultado,'Todos')+'</select></label><label>Estado de causa<select name="estado">'+opciones(S.meta.estados,f.estado,'Todos')+'</select></label></div><div class="checks">'+[['evaluacion','Evaluación 308 / Desestimación'],['orac','ORAC pendiente'],['vencidas','Medidas vencidas'],['reiteradas','Reiteradas'],['limitado','Potencial limitado'],['camaras','Cámaras: riesgo crítico']].map(([name,label])=>'<label class="check"><input type="checkbox" name="'+name+'" '+(f[name]?'checked':'')+'>'+label+'</label>').join('')+'<button class="pequeno" type="submit">Aplicar filtros</button><button class="pequeno texto" type="button" data-action="limpiarFiltros">Limpiar</button></div></form><p class="muted" style="margin:12px 0 0">'+t.totalCausas+' causas · Indicadores según filtros activos'+(f.proximas?' · Vista de medidas próximas a vencer':'')+'</p></section>'+
+ '<section class="panel"><div class="seccion-titulo"><h2>Medidas que requieren seguimiento</h2><small>Control: '+fmt(t.hoy)+'</small></div><div class="tabla-scroll"><table><thead><tr><th>IPP / Instructora</th><th>Medida</th><th>Control</th><th>Acciones rápidas</th></tr></thead><tbody>'+medidas.filter(m=>!f.proximas||m.alerta.nivel==='amarillo').map(m=>'<tr><td><strong>'+esc(caso(m.causaId).ipp)+'</strong><span class="muted">'+esc(caso(m.causaId).instructora)+'</span></td><td>'+resumenMedida(m)+'</td><td>'+badge(m.alerta)+'<span class="muted">'+fmt(m.alerta.fecha)+'</span></td><td>'+botonesMedida(m)+'</td></tr>').join('')+'</tbody></table>'+(medidas.length?'':'<div class="vacio">No hay medidas pendientes para estos filtros.</div>')+'</div>'+paginador(t.paginas.medidas,'paginaMedidas')+'</section>'+
+ ((alertasT.length||f.evaluacion)?'<section class="panel panel-evaluacion"><h2>CAUSAS PENDIENTES DE EVALUACIÓN 308 / DESESTIMACIÓN</h2><div class="tabla-scroll"><table><thead><tr><th>IPP / Instructora</th><th>Ingreso / días transcurridos</th><th>Alerta de evaluación interna</th><th>Acciones</th></tr></thead><tbody>'+alertasT.map(a=>'<tr><td><strong>'+esc(a.ipp)+'</strong><span class="muted">'+esc(a.instructora)+'</span></td><td>'+fmt(a.fechaIngresoEvaluacion||a.fechaCreacion)+'<span class="muted">'+a.diasTranscurridos+' días corridos</span></td><td>'+badge(a.alerta)+'</td><td><div class="acciones"><button class="pequeno" data-action="controlEvaluacionTablero" data-id="'+a.id+'">Registrar control</button><button class="pequeno" data-action="cumplirEvaluacionTablero" data-id="'+a.id+'">Evaluación cumplida</button><button class="pequeno texto" data-action="ficha" data-id="'+a.causaId+'">Abrir ficha →</button></div></td></tr>').join('')+'</tbody></table>'+(!alertasT.length?'<div class="vacio">No hay evaluaciones activas para estos filtros.</div>':'')+'</div>'+paginador(t.paginas.evaluaciones,'paginaEvaluaciones')+'</section>':'')+
+ (t.camarasCriticas.length?'<section class="panel"><h2>Conservación urgente de videofilmaciones</h2>'+t.camarasCriticas.map(c=>'<p><button class="texto" data-action="ficha" data-id="'+c.id+'">'+esc(c.ipp)+'</button> '+badge(c.camarasAlerta)+' <small>Referencia: '+fmt(c.camarasAlerta.fecha)+'</small></p>').join('')+'</section>':'')+
+ '<section class="panel"><h2>Causas</h2><div class="tabla-scroll"><table><thead><tr><th>IPP</th><th>Investigación / resultado</th><th>Responsable</th><th>Situación</th><th>ORAC</th><th></th></tr></thead><tbody>'+t.causas.map(c=>'<tr><td><strong>'+esc(c.ipp)+'</strong><span class="muted">Sumario: '+fmt(c.fechaSumario)+'</span></td><td>'+esc(c.tipo)+'<span class="muted">'+esc(c.resultado)+'</span></td><td>'+esc(c.instructora)+'</td><td>'+esc(c.estado)+(c.potencial?'<span class="muted">Potencial: '+esc(c.potencial)+'</span>':'')+'</td><td>'+esc(c.oracEstado||'—')+(c.oracEstado&&c.oracEstado!=='Devuelta'?'<br>'+badge(c.oracAlerta):'')+'</td><td><button class="pequeno texto" data-action="ficha" data-id="'+c.id+'">Abrir ficha →</button></td></tr>').join('')+'</tbody></table>'+(t.causas.length?'':'<div class="vacio">Sin causas para mostrar. Iniciá la carga con NUEVA CAUSA.</div>')+'</div>'+paginador(t.paginas.causas,'paginaCausas')+'</section><div class="leyenda"><span class="badge rojo">Vencida / segunda alerta</span><span class="badge naranja">Primera alerta</span><span class="badge amarillo">Próxima a vencer</span><span class="badge verde">Dentro de plazo</span><span class="badge azul">Evaluación pendiente</span></div>';
+ $('#actualizado').textContent='Última actualización: '+new Intl.DateTimeFormat('es-AR',{timeStyle:'short',timeZone:'America/Argentina/Buenos_Aires'}).format(new Date());
+}
+function paginador(info,campo){return info.total>100?'<div class="paginacion"><button class="pequeno" data-action="pagina" data-campo="'+campo+'" data-numero="'+Math.max(0,info.pagina-1)+'" '+(info.pagina===0?'disabled':'')+'>Anterior</button><span>Página '+(info.pagina+1)+' de '+info.paginas+' · '+info.total+' registros</span><button class="pequeno" data-action="pagina" data-campo="'+campo+'" data-numero="'+(info.pagina+1)+'" '+(info.pagina+1===info.paginas?'disabled':'')+'>Siguiente</button></div>':'';}
+function leerFiltros(){const fd=new FormData($('#filtros')),f={};for(const [k,v] of fd.entries())f[k]=v==='on'?true:v;return f;}
+function nueva(c){
+ S.vista='formulario';S.editando=c||null;S.analisis=null;S.manuales=[];S.revision=0;S.analisisRevision=-1;
+ const v=JSON.parse(JSON.stringify(c||{instructora:S.usuaria,fechaSumario:S.meta.hoy,datos:{}}));
+ if(v.tipo==='Mala praxis'&&v.datos.estudiosExcepcionales===undefined)v.datos.estudiosExcepcionales=['autopsia','anatomia'].some(k=>v.datos[k]&&v.datos[k]!=='No corresponde');
+ if(v.tipo!=='Mala praxis'&&!v.datos.preservacion)v.datos.preservacion=v.datos.camaras==='Recibidas'?'Videofilmaciones recibidas':'No consta solicitud de preservación';
+ const p=(v.principalTipo||'').startsWith('Otra: ')?'Otra':v.principalTipo;
+ $('#contenido').innerHTML='<div class="encabezado"><div><p class="eyebrow">'+(c?'FICHA DE CAUSA':'PRIMER DESPACHO')+'</p><h1>'+(c?'Editar causa':'Nueva causa')+'</h1><p>Completá la plantilla y revisá las medidas antes de confirmar.</p></div><button data-action="'+(c?'cancelarEdicion':'tablero')+'">← Volver</button></div><form id="causaForm"><section class="panel"><h2>1. Datos básicos</h2><div class="grid"><label>IPP<input name="ipp" maxlength="100" required value="'+esc(v.ipp||'')+'"></label><label>Fecha del hecho<input type="date" name="fechaHecho" max="'+S.meta.hoy+'" required value="'+esc(v.fechaHecho||'')+'"></label><label>Recepción del sumario<input type="date" name="fechaSumario" max="'+S.meta.hoy+'" required value="'+esc(v.fechaSumario||'')+'"></label><label>Instructora responsable<select name="instructora" required>'+opciones(usuarios,v.instructora,'Seleccionar')+'</select></label><label>Tipo de resultado<select name="resultado" required>'+opciones(['Lesiones culposas','Homicidio culposo'],v.resultado,'Seleccionar')+'</select></label><label>Tipo de investigación<select name="tipo" required '+(c?'disabled':'')+'>'+opciones(Object.keys(S.meta.campos),v.tipo,'Seleccionar')+'</select></label></div></section><section class="panel"><h2>2. Plantilla de investigación</h2><div id="plantilla"></div><label style="margin-top:20px">Dato relevante / particularidad de la investigación <small>Opcional · hasta 500 caracteres</small><textarea name="dato" rows="2" maxlength="500">'+esc(v.dato||'')+'</textarea></label></section><div class="acciones"><button class="primario" type="submit">'+(c?'GUARDAR CAMBIOS':'REVISAR MEDIDAS Y PROPUESTA →')+'</button></div></form><div id="revision"></div>';
+ renderPlantilla(Object.assign({},v,{principalTipo:p,principalOtra:p==='Otra'?v.principalTipo.slice(6):''}));window.scrollTo(0,0);
+}
+function leerCausa(){
+ const form=$('#causaForm'),fd=new FormData(form),get=k=>fd.get(k)||'';
+ const c={ipp:get('ipp'),fechaHecho:get('fechaHecho'),fechaSumario:get('fechaSumario'),instructora:get('instructora'),resultado:get('resultado'),tipo:S.editando?S.editando.tipo:get('tipo'),dato:get('dato'),principalTipo:get('principalTipo'),principalOtra:get('principalOtra'),datos:{}};
+ (S.meta.campos[c.tipo]||[]).forEach(f=>c.datos[f[0]]=get('d_'+f[0]));
+ c.datos.documentacionReunida=fd.get('documentacionReunida')==='on';c.datos.estudiosExcepcionales=fd.get('estudiosExcepcionales')==='on';
+ c.datos.listaTestigos=$$('.testigo').map((row,i)=>({id:row.dataset.tid||'testigo-'+(i+1),estado:row.querySelector('[data-w="estado"]').value,hora:row.querySelector('[data-w="hora"]').value,nombre:row.querySelector('[data-w="nombre"]').value,telefono:row.querySelector('[data-w="telefono"]').value,fecha:row.querySelector('[data-w="fecha"]').value}));
+ return c;
+}
+function campoVisible(f,c){return !f[3]||f[3]==='medicoContextual'&&(c.resultado==='Homicidio culposo'||c.datos.estudiosExcepcionales===true)||f[3]==='homicidio'&&c.resultado==='Homicidio culposo'||f[3]==='camaras'&&c.datos.camaras==='Recibidas'||f[3]==='allanamiento'&&['Requiere allanamiento','Requiere secuestro','Ya secuestrada'].includes(c.datos.historia);}
+function renderPlantilla(c){
+ if(c.tipo!=='Mala praxis'&&!c.datos.preservacion)c.datos.preservacion=c.datos.camaras==='Recibidas'?'Videofilmaciones recibidas':'No consta solicitud de preservación';
+ const fs=S.meta.campos[c.tipo];if(!fs){$('#plantilla').innerHTML='<p class="muted">Seleccioná el tipo de investigación.</p>';return;}
+ let html=(c.tipo==='Mala praxis'&&c.resultado!=='Homicidio culposo'?'<label class="check" style="margin-bottom:18px"><input type="checkbox" name="estudiosExcepcionales" '+(c.datos.estudiosExcepcionales?'checked':'')+'>Autopsia / anatomía patológica pertinentes en este supuesto excepcional</label>':'')+'<div class="grid">'+fs.filter(f=>campoVisible(f,c)).map(f=>'<label>'+esc(f[1])+'<select required name="d_'+f[0]+'">'+opciones(f[2],c.datos[f[0]],'Seleccionar')+'</select></label>').join('');
+ if(c.tipo==='Otros')html+='<label>Prueba principal<select required name="principalTipo">'+opciones(['Pericia de seguridad e higiene','Pericia mecánica','Informe técnico','Otra'],c.principalTipo,'Seleccionar')+'</select></label>'+(c.principalTipo==='Otra'?'<label>Especificar prueba principal<input name="principalOtra" maxlength="120" required value="'+esc(c.principalOtra||'')+'"></label>':'');
+ html+='</div>';
+ if(c.tipo==='Mala praxis')html+='<p class="nota">La investigación culmina en una pericia médica. No se calcula potencial investigativo. Si la historia ya fue secuestrada, verificá que esté completa antes de marcar documentación reunida.</p><label class="check"><input name="documentacionReunida" type="checkbox" '+(c.datos.documentacionReunida?'checked':'')+'>Confirmo que la documentación necesaria está reunida y completa.</label>';
+ if(c.datos.testigos==='Sí'){
+ const ts=c.datos.listaTestigos||[];
+ html+='<div style="margin-top:22px"><h3>Testigos presenciales</h3><p class="muted">Podés continuar sin individualizarlos. Agregá los datos cuando estén disponibles. Si la audiencia ya está registrada, actualizá su fecha y cumplimiento desde Tareas de la ficha.</p>'+ts.map((t,i)=>'<div class="testigo" data-tid="'+esc(t.id||'testigo-'+(i+1))+'"><label>Nombre y apellido (opcional)<input data-w="nombre" maxlength="150" value="'+esc(t.nombre)+'"></label><label>Teléfono (opcional)<input data-w="telefono" type="tel" maxlength="60" value="'+esc(t.telefono)+'"></label><label>Audiencia (si está designada)<input data-w="fecha" type="date" value="'+esc(t.fecha)+'"></label><label>Hora (opcional)<input data-w="hora" type="time" value="'+esc(t.hora||'')+'"></label><label>Situación<select data-w="estado">'+opciones(['Individualización pendiente','Individualizado','Audiencia designada','Declaración recibida'],t.estado||(t.fecha?'Audiencia designada':t.nombre?'Individualizado':'Individualización pendiente'))+'</select></label><button type="button" data-action="quitarTestigo" data-index="'+i+'" aria-label="Quitar testigo">×</button></div>').join('')+'<button type="button" data-action="agregarTestigo">＋ Agregar testigo</button></div>';
+ }
+ $('#plantilla').innerHTML=html;
+}
+function invalidar(){S.revision++;if($('#revision'))$('#revision').innerHTML='';S.analisis=null;}
+function renderRevision(){
+ const a=S.analisis,c=leerCausa();
+ $('#revision').innerHTML='<section class="panel" style="margin-top:25px"><h2>3. Resumen y medidas propuestas</h2><div class="resumen"><div><small>IPP</small><strong>'+esc(c.ipp)+'</strong></div><div><small>Investigación</small>'+esc(c.tipo)+' · '+esc(c.resultado)+'</div><div><small>Responsable</small>'+esc(c.instructora)+'</div>'+(a.potencial?'<div><small>Potencial investigativo</small><span class="badge '+(a.potencial==='Identificado'?'verde':a.potencial==='Limitado'?'naranja':'amarillo')+'">'+esc(a.potencial)+'</span></div>':'')+'</div>'+(a.camarasAlerta&&a.camarasAlerta.nivel!=='sin'?'<p class="nota">'+badge(a.camarasAlerta)+'<br><small>Conservación de referencia desde el hecho: '+fmt(a.camarasAlerta.fecha)+'. La solicitud de imágenes no acredita su preservación.</small></p>':'')+'<p class="nota">Seleccioná las medidas y tareas que se ordenarán. El seguimiento se activa únicamente al confirmar el despacho.</p><label>Fecha de solicitud para medidas sugeridas<input id="fechaDespacho" type="date" value="'+S.meta.hoy+'" max="'+S.meta.hoy+'" required></label><div id="sugerencias">'+a.sugerencias.map((m,i)=>'<div class="sugerencia"><label class="check"><input type="checkbox" data-sugerencia="'+i+'" checked><span>'+esc(m.descripcion)+'<small>'+(m.clase==='tarea'?'Tarea interna'+(m.fechaAudiencia?' · Audiencia: '+fmt(m.fechaAudiencia):''):esc(m.organismo)+' · '+m.plazo+' días corridos')+(m.principal?' · Prueba principal':'')+(m.necesariaEvaluacion?' · Necesaria para evaluación':'')+'</small></span></label></div>').join('')+(a.sugerencias.length?'':'<p class="muted">No hay sugerencias para esta carga. Podés agregar medidas manuales.</p>')+'</div><div id="manuales"></div><button data-action="manualBorrador" style="margin-top:15px">＋ AGREGAR MEDIDA</button></section><section class="panel"><div class="seccion-titulo"><h2>4. Propuesta de primer despacho</h2><button data-action="regenerar">Regenerar propuesta</button></div><p class="muted">Proyecto editable, sujeto a revisión de la instructora y de la Fiscal antes de copiar a SIMP. No se guarda en esta aplicación.</p><textarea id="despacho" class="despacho" aria-label="Propuesta de despacho"></textarea><div class="acciones"><button data-action="copiar">Copiar texto</button><button data-action="confirmar" class="primario">CONFIRMAR DESPACHO Y ACTIVAR SEGUIMIENTO</button></div></section>';
+ renderManuales();generarDespacho();$('#revision').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function elegidas(){return $$('[data-sugerencia]:checked').map(el=>S.analisis.sugerencias[Number(el.dataset.sugerencia)]);}
+function renderManuales(){$('#manuales').innerHTML=S.manuales.map((m,i)=>'<div class="sugerencia"><strong>'+esc(m.descripcion)+'</strong><small> · '+esc(m.organismo)+' · '+m.plazo+' días'+(m.principal?' · Principal':'')+'</small> <button class="pequeno texto" data-action="quitarManual" data-index="'+i+'">Quitar</button></div>').join('');}
+const etiquetasMedida={PERSONALIZADA:'Medida personalizada',RML:'Reconocimiento médico legal',CRIP:'CRIP',HISTORIA_CLINICA:'Historia clínica',INFORME_TRANSITO:'Informe de Tránsito',PRESERVAR_CAMARAS:'Preservación de videofilmaciones',CAMARAS:'Remisión de videofilmaciones',INDIVIDUALIZAR:'Individualización de testigos',INSPECCION:'Inspección técnica',DOCUMENTACION_TECNICA:'Documentación técnica / administrativa',FECHA_MEDICA:'Fecha de pericia médica',FECHA_ACCIDENTOLOGICA:'Fecha de pericia accidentológica',DICTAMEN_MEDICO:'Dictamen médico principal',DICTAMEN_ACCIDENTOLOGICO:'Dictamen accidentológico principal',AMPLIACION_MEDICA:'Ampliación de pericia médica',ESPECIALISTA:'Pericia por especialista',PRINCIPAL_OTROS:'Prueba principal de Otros'};
+function opcionesMedida(){return S.meta.tiposMedida.map(k=>'<option value="'+k+'">'+esc(etiquetasMedida[k]||k)+'</option>').join('');}
+function formMedida(){return '<label>Categoría<select name="tipo">'+opcionesMedida()+'</select></label><label>Naturaleza<select name="naturaleza">'+opciones(['Requerimiento','Ampliación','Nueva pericia'],'Requerimiento')+'</select></label><label>Descripción<input name="descripcion" maxlength="500" required></label><label>Organismo<input name="organismo" maxlength="200" required></label><div class="grid"><label>Fecha de solicitud<input name="fechaSolicitud" type="date" max="'+S.meta.hoy+'" value="'+S.meta.hoy+'" required></label><label>Plazo (días corridos)<input name="plazo" type="number" min="0" max="3650" value="'+S.meta.config.GENERAL+'" required></label></div><label class="check"><input name="principal" type="checkbox">Será prueba principal</label><label class="check"><input name="necesariaEvaluacion" type="checkbox">Necesaria para la evaluación final</label><small>Un nuevo requerimiento conserva las diligencias anteriores. Para reiterar uno existente, usá Reiterada en su fila.</small>';}
+function abrirDialogo(titulo,html,callback,peligro=false){$('#dialogTitulo').textContent=titulo;$('#dialogCuerpo').innerHTML=html;dialogCallback=callback;$('#dialogConfirmar').className=peligro?'peligro':'primario';$('#dialogo').showModal();}
+function datosDialogo(form){const fd=new FormData(form),o={};for(const [k,v]of fd.entries())o[k]=v==='on'?true:v;return o;}
+async function mostrarFicha(id){S.ficha=await rpc('ficha',{id});S.vista='ficha';renderFicha();window.scrollTo(0,0);}
+function aplicarFicha(f){if(!f)return;S.ficha=f;S.vista='ficha';renderFicha();}
+function renderFicha(){
+ const f=S.ficha,c=f.causa,stage=c.periciaEstado;
+ const pasos=['Sin iniciar','Fecha solicitada','Fecha otorgada','Pericia designada','Pericia realizada / dictamen pendiente','Dictamen recibido'];
+ let pericia='';
+ if(c.tipo!=='Otros')pericia='<section class="panel"><h2>Pericia '+(c.tipo==='Mala praxis'?'médica':'accidentológica')+'</h2><div class="pasos">'+pasos.map(p=>'<span class="'+(p===stage?'activo':'')+'">'+esc(p)+'</span>').join('')+'</div><p>Fecha de pericia: <strong>'+fmt(c.periciaFecha)+'</strong></p><div class="acciones">'+(stage==='Sin iniciar'?'<button data-action="pericia" data-paso="solicitar">Solicitar fecha</button>':'')+(['Fecha solicitada','Fecha otorgada'].includes(stage)?'<button data-action="pericia" data-paso="fecha">Registrar fecha otorgada</button>':'')+(stage==='Fecha otorgada'?'<button data-action="pericia" data-paso="designar">Designar pericia</button>':'')+(stage==='Pericia designada'?'<button data-action="pericia" data-paso="realizada">Pericia realizada / dictamen pendiente</button>':'')+(stage==='Pericia realizada / dictamen pendiente'?'<span class="muted">Marcar el dictamen como recibido en Medidas.</span>':'')+'</div></section>';
+ let orac='';if(c.tipo==='Tránsito'&&(c.potencial==='Identificado'||c.oracEstado))orac='<section class="panel"><div class="seccion-titulo"><h2>ORAC</h2>'+badge(c.oracAlerta)+'</div><div class="resumen"><div><small>Estado</small>'+esc(c.oracEstado||'Sin remisión')+'</div><div><small>Remisión</small>'+fmt(c.oracFecha)+'</div><div><small>Primera alerta</small>'+fmt(c.oracPrimera)+'</div><div><small>Última gestión / segunda alerta</small>'+fmt(c.oracReiteracion)+' / '+fmt(c.oracSegunda)+'</div><div><small>Devolución</small>'+fmt(c.oracDevolucion)+'</div></div><div class="acciones">'+(!c.oracEstado||c.oracEstado==='Devuelta'?'<button data-action="orac" data-paso="remitir">Remitir a ORAC</button>':'<button data-action="orac" data-paso="tramite">En trámite</button><button data-action="orac" data-paso="reiterar">Registrar gestión / reiteración</button><button data-action="orac" data-paso="devolver">Registrar devolución</button>')+'</div></section>';
+ const campos=S.meta.campos[c.tipo].filter(x=>campoVisible(x,c));
+ $('#contenido').innerHTML='<div class="encabezado"><div><p class="eyebrow">FICHA DE CAUSA</p><h1>IPP '+esc(c.ipp)+'</h1><p>'+esc(c.tipo)+' · '+esc(c.resultado)+' · '+esc(c.instructora)+'</p></div><div><button data-action="tablero">← Tablero</button> <button data-action="editar">Editar causa</button></div></div><section class="panel"><div class="resumen"><div><small>Estado</small><strong>'+esc(c.estado)+'</strong></div><div><small>Fecha del hecho</small>'+fmt(c.fechaHecho)+'</div><div><small>Recepción sumario</small>'+fmt(c.fechaSumario)+'</div>'+(c.potencial?'<div><small>Potencial investigativo</small>'+esc(c.potencial)+'</div>':'')+'<div><small>Prueba principal</small>'+esc(c.principalTipo)+'<br><span class="badge '+(c.principalRecibida?'azul':'sin')+'">'+(c.principalRecibida?'Recibida':'Pendiente')+'</span></div></div>'+(c.dato?'<p class="nota">'+esc(c.dato)+'</p>':'')+'<details><summary>Ver triaje y datos de origen</summary><div class="grid" style="margin-top:18px">'+campos.map(x=>'<div><small>'+esc(x[1])+'</small><div>'+esc(c.datos[x[0]])+'</div></div>').join('')+'</div>'+(c.datos.listaTestigos||[]).map(t=>'<p>'+esc(t.nombre)+' · '+esc(t.telefono||'Sin teléfono')+' · Audiencia '+fmt(t.fecha)+'</p>').join('')+'</details></section>'+renderNuevasDiligencias(f)+(c.camarasAlerta.nivel!=='sin'?'<section class="panel"><h2>Conservación de cámaras</h2>'+badge(c.camarasAlerta)+'<p class="muted">Fecha de referencia: '+fmt(c.camarasAlerta.fecha)+'. No presume destrucción de imágenes. La remisión se controla como medida independiente.</p></section>':'')+pericia+orac+
+ '<section class="panel"><div class="seccion-titulo"><h2>Medidas</h2><button data-action="agregarMedida" class="primario">＋ AGREGAR MEDIDA</button></div><div class="tabla-scroll"><table><thead><tr><th>Medida / organismo</th><th>Solicitud / plazo</th><th>Controles</th><th>Recepción</th><th>Acciones</th></tr></thead><tbody>'+f.medidas.map(m=>'<tr><td>'+resumenMedida(m)+'</td><td>'+fmt(m.fechaSolicitud)+'<span class="muted">'+m.plazo+' días corridos</span></td><td>'+badge(m.alerta)+'<span class="muted">1.ª: '+fmt(m.primeraAlerta)+'<br>Reiteración: '+fmt(m.fechaReiteracion)+'<br>2.ª: '+fmt(m.segundaAlerta)+'</span></td><td>'+fmt(m.fechaRecepcion)+'</td><td>'+botonesMedida(m)+'<button class="pequeno texto" data-action="estadoMedida" data-id="'+m.id+'">Cambiar estado</button><button class="pequeno texto" data-action="rolMedida" data-id="'+m.id+'">Rol en evaluación</button></td></tr>').join('')+'</tbody></table>'+(f.medidas.length?'':'<div class="vacio">Sin medidas registradas.</div>')+'</div></section>'+
+ '<section class="panel"><div class="seccion-titulo"><h2>Tareas internas</h2><button data-action="agregarTarea">＋ Agregar tarea</button></div><div class="tabla-scroll"><table><thead><tr><th>Tarea</th><th>Estado / fechas</th><th>Alerta</th><th>Acciones</th></tr></thead><tbody>'+f.tareas.map(t=>'<tr><td><strong>'+esc(t.tipo)+'</strong><span class="muted">'+esc(t.descripcion)+'</span></td><td>'+esc(t.estado)+(t.fechaAudiencia?'<span class="muted">Audiencia: '+fmt(t.fechaAudiencia)+'</span>':'')+'</td><td>'+badge(t.alerta)+(t.primeraAlerta&&!t.evaluacionSuspendida?'<span class="muted">1.ª: '+fmt(t.primeraAlerta)+'<br>2.ª: '+fmt(t.segundaAlerta)+'</span>':'')+'</td><td><div class="acciones">'+(t.estado==='Pendiente'&&!t.evaluacionSuspendida?'<button class="pequeno" data-action="cumplirTarea" data-id="'+t.id+'">'+(t.tipo==='Evaluación 308 / Desestimación'?'Cerrar evaluación':'Cumplida')+'</button>':t.estado==='Cumplida'?'<button class="pequeno" data-action="reabrirTarea" data-id="'+t.id+'">Reabrir</button>':'<span class="muted">Esperando prueba necesaria</span>')+(t.tipo==='Audiencia testimonial'?'<button class="pequeno" data-action="fechaTarea" data-id="'+t.id+'">Fecha de audiencia</button>':'')+(t.tipo==='Evaluación 308 / Desestimación'&&t.estado==='Pendiente'&&!t.evaluacionSuspendida?'<button class="pequeno" data-action="reiterarTarea" data-id="'+t.id+'">Registrar control</button>':'')+'</div></td></tr>').join('')+'</tbody></table>'+(f.tareas.length?'':'<div class="vacio">Sin tareas internas.</div>')+'</div></section>'+
+ '<section class="panel"><details><summary>Bitácora de actuaciones</summary><button class="pequeno" data-action="cargarBitacora">Cargar historial</button><div id="historialCompleto"></div></details><div class="acciones"><button data-action="estadoCausa">Cambiar estado de causa</button><button data-action="eliminar" class="peligro">Eliminar causa definitivamente</button></div>'+(c.ipp.startsWith('FICTICIA-')?'<details><summary>Validación con datos ficticios</summary><p>Envía dos modificaciones simultáneas con la misma versión. Debe aceptar una y rechazar la desactualizada.</p><button data-action="probarConcurrencia">Probar concurrencia real en Apps Script</button></details>':'')+'</section>';
+}
+function renderNuevasDiligencias(f){
+ if(!f.sugerencias.length)return '';
+ return '<section class="panel"><h2>Nuevas diligencias propuestas</h2><p class="muted">Se recalculan según la información actual. Ninguna medida existente se modifica. Desmarcá las que no quieras ordenar en esta revisión.</p>'+f.sugerencias.map((m,i)=>'<div class="sugerencia"><label class="check"><input type="checkbox" data-nueva="'+i+'" checked><span>'+esc(m.descripcion)+'<small>'+(m.clase==='tarea'?'Tarea interna':esc(m.organismo)+' · '+m.plazo+' días corridos')+'</small></span></label></div>').join('')+'<label>Fecha de solicitud<input type="date" id="fechaDespacho" value="'+S.meta.hoy+'" max="'+S.meta.hoy+'" required></label><details><summary>Proyecto de despacho de nuevas diligencias</summary><textarea id="despacho" class="despacho" aria-label="Propuesta de nuevas diligencias"></textarea><button data-action="regenerar">Generar / regenerar proyecto</button><button data-action="copiar">Copiar texto</button></details><div class="acciones"><button data-action="confirmarNuevas" class="primario">CONFIRMAR NUEVAS DILIGENCIAS Y ACTIVAR SEGUIMIENTO</button></div></section>';
+}
+function medidaPorId(id){return (S.vista==='tablero'?S.tablero.medidas:S.ficha.medidas).find(m=>m.id===id);}
+function dialogEstado(m,estado){abrirDialogo('Registrar '+(estado||'estado de medida'),'<p>'+esc(m.descripcion)+'</p>'+(!estado?'<label>Estado<select name="estado">'+opciones(S.meta.estadosMedida,m.estado)+'</select></label>':'<input type="hidden" name="estado" value="'+esc(estado)+'">')+'<label>Fecha de la gestión / recepción<input name="fecha" type="date" value="'+S.meta.hoy+'" max="'+S.meta.hoy+'" required></label>'+(['FECHA_MEDICA','FECHA_ACCIDENTOLOGICA'].includes(m.tipo)?'<label>Fecha otorgada para la pericia (obligatoria al recibir)<input name="fechaPericia" type="date" '+(estado==='Recibida'?'required':'')+'></label>':''),async d=>{const f=await escritura('estadoMedida',Object.assign(d,{id:m.id,version:m.version}));if(S.vista==='tablero')await actualizarTablero();else aplicarFicha(f);aviso('Medida actualizada.');});}
+async function accion(b){
+ const a=b.dataset.action,id=b.dataset.id,c=S.ficha&&S.ficha.causa;
+ if(S.busy)return;
+ if(a==='pagina'){S.filtros[b.dataset.campo]=Number(b.dataset.numero);await actualizarTablero();return;}
+ if(a==='confirmarNuevas'){
+  if(!$('#fechaDespacho').reportValidity())return;
+  aplicarFicha(await escritura('confirmarNuevas',{id:c.id,version:c.version,claves:$$('[data-nueva]:checked').map(el=>S.ficha.sugerencias[Number(el.dataset.nueva)].clave),fechaSolicitud:$('#fechaDespacho').value}));aviso('Diligencias confirmadas. Las no seleccionadas quedan disponibles para otra revisión.');return;
+ }
+ if(a==='cargarBitacora'){
+  const pagina=await rpc('bitacora',{id:c.id,...(b.dataset.hasta?{hasta:Number(b.dataset.hasta)}:{})});
+  if(b.dataset.hasta)b.remove();else $('#historialCompleto').innerHTML='';
+  $('#historialCompleto').insertAdjacentHTML('beforeend','<div class="tabla-scroll"><table><thead><tr><th>Fecha</th><th>Usuaria</th><th>Acción</th><th>Detalle</th></tr></thead><tbody>'+pagina.items.map(x=>'<tr><td>'+esc(x.fechaHora)+'</td><td>'+esc(x.usuaria)+'</td><td>'+esc(x.accion)+'</td><td>'+esc(x.detalle)+'</td></tr>').join('')+'</tbody></table></div>'+(pagina.siguiente?'<button data-action="cargarBitacora" data-hasta="'+pagina.siguiente+'">Ver movimientos anteriores</button>':''));return;
+ }
+ if(['controlEvaluacionTablero','cumplirEvaluacionTablero'].includes(a)){
+  const t=S.tablero.evaluaciones.find(t=>t.id===id),control=a==='controlEvaluacionTablero';
+  abrirDialogo(control?'Registrar control de evaluación':'Evaluación cumplida','<p>IPP '+esc(t.ipp)+' · '+esc(t.instructora)+'</p>'+(control?'<label>Fecha de control<input type="date" name="fecha" max="'+S.meta.hoy+'" value="'+S.meta.hoy+'" required></label>':'<label>Estado posterior<select name="estadoCausa">'+opciones(['En seguimiento','Cerrada'],'En seguimiento')+'</select></label>'),async d=>{await escritura('tarea',Object.assign(d,{id:t.id,version:t.version,operacion:control?'reiterar':'estado',estado:'Cumplida'}));await actualizarTablero();});return;
+ }
+ if(a==='cerrarDialogo'){$('#dialogo').close();return;}
+ if(a==='salir'){try{sessionStorage.removeItem('ufij22_demo_usuaria');}catch(e){}S.usuaria='';S.ficha=null;S.analisis=null;S.manuales=[];$('#contenido').innerHTML='';$('#app').hidden=true;$('#ingreso').hidden=false;return;}
+ if(a==='tablero'){S.vista='tablero';await actualizarTablero();return;}
+ if(a==='actualizar'){await actualizarTablero();aviso('Base actualizada.');return;}
+ if(a==='nueva'){nueva();return;}
+ if(a==='ficha'){await mostrarFicha(id);return;}
+ if(a==='editar'){nueva(c);return;}
+ if(a==='cancelarEdicion'){S.vista='ficha';renderFicha();return;}
+ if(a==='limpiarFiltros'){S.filtros={};await actualizarTablero();return;}
+ if(a==='kpi'){S.filtros={};S.filtros[b.dataset.key]=true;await actualizarTablero();return;}
+ if(['agregarTestigo','quitarTestigo'].includes(a)){const v=leerCausa();if(a==='agregarTestigo')v.datos.listaTestigos.push({id:'t-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8),nombre:'',telefono:'',fecha:'',hora:'',estado:'Individualización pendiente'});else v.datos.listaTestigos.splice(Number(b.dataset.index),1);invalidar();renderPlantilla(v);return;}
+ if(a==='regenerar'){generarDespacho();aviso('Propuesta regenerada.');return;}
+ if(a==='copiar'){const t=$('#despacho');try{await navigator.clipboard.writeText(t.value);aviso('Propuesta copiada. Revisala antes de incorporarla a SIMP.');}catch(e){t.focus();t.select();if(document.execCommand('copy'))aviso('Propuesta copiada.');else aviso('El navegador bloqueó el portapapeles. Texto seleccionado: usá Ctrl+C.',true);}return;}
+ if(a==='manualBorrador'){abrirDialogo('Agregar medida al despacho',formMedida(),async d=>{d.plazo=Number(d.plazo);d.principal=d.principal===true;S.manuales.push(d);renderManuales();generarDespacho();});return;}
+ if(a==='quitarManual'){S.manuales.splice(Number(b.dataset.index),1);renderManuales();generarDespacho();return;}
+ if(a==='confirmar'){
+  if(!$('#causaForm').reportValidity()||!$('#fechaDespacho').reportValidity())return;
+  if(S.analisisRevision!==S.revision){aviso('Revisá nuevamente las medidas: la carga cambió.',true);return;}
+  const f=await escritura('confirmar',{causa:leerCausa(),claves:elegidas().map(x=>x.clave),manuales:S.manuales,fechaSolicitud:$('#fechaDespacho').value});
+  S.analisis=null;S.manuales=[];aplicarFicha(f);aviso('Despacho confirmado. Seguimiento activado.');window.scrollTo(0,0);return;
+ }
+ if(['reiterar','recibir','estadoMedida'].includes(a)){dialogEstado(medidaPorId(id),a==='reiterar'?'Reiterada':a==='recibir'?'Recibida':null);return;}
+ if(a==='rolMedida'){
+  const m=medidaPorId(id);abrirDialogo('Rol de la prueba para evaluación','<p>'+esc(m.descripcion)+'</p><label class="check"><input type="checkbox" name="principal" '+(m.principal?'checked':'')+'>Prueba principal</label><label class="check"><input type="checkbox" name="necesariaEvaluacion" '+(m.necesariaEvaluacion?'checked':'')+'>Necesaria para evaluación final</label><p class="muted">El dictamen original y las complementarias médicas conservan su carácter necesario. Para dejar sin efecto una medida, usá Cambiar estado.</p>',async d=>aplicarFicha(await escritura('rolMedida',Object.assign(d,{id:m.id,version:m.version}))));return;
+ }
+ if(a==='agregarMedida'){abrirDialogo('Agregar medida',formMedida(),async d=>{d.plazo=Number(d.plazo);d.principal=d.principal===true;aplicarFicha(await escritura('agregarMedida',{id:c.id,version:c.version,medida:d}));});return;}
+ if(a==='agregarTarea'){abrirDialogo('Agregar tarea interna','<label>Tipo<select name="tipo">'+opciones(['Acta de apertura','Audiencia testimonial','Otra'],'Otra')+'</select></label><label>Descripción<input name="descripcion" maxlength="500" required></label><label>Fecha de audiencia (si corresponde)<input name="fechaAudiencia" type="date"></label>',async d=>aplicarFicha(await escritura('agregarTarea',{id:c.id,version:c.version,tarea:d})));return;}
+ if(['cumplirTarea','reabrirTarea','fechaTarea','reiterarTarea'].includes(a)){
+  const t=S.ficha.tareas.find(x=>x.id===id),p={id:t.id,version:t.version};
+  const html=a==='fechaTarea'?'<label>Fecha de audiencia<input type="date" name="fecha" required value="'+esc(t.fechaAudiencia)+'"></label><label>Hora (opcional)<input type="time" name="hora" value="'+esc(t.horaAudiencia||'')+'"></label>':a==='reiterarTarea'?'<label>Fecha de control<input type="date" name="fecha" required max="'+S.meta.hoy+'" value="'+S.meta.hoy+'"></label>':a==='cumplirTarea'&&t.tipo==='Evaluación 308 / Desestimación'?'<p>Confirmá que la evaluación fue realizada. Las pruebas complementarias pendientes impiden cerrarla.</p><label>Estado posterior de la causa<select name="estadoCausa">'+opciones(['En seguimiento','Cerrada'],'En seguimiento')+'</select></label>':'<p>'+esc(t.descripcion)+' → '+(a==='reabrirTarea'?'Pendiente':'Cumplida')+'</p>';
+  abrirDialogo('Actualizar tarea',html,async d=>aplicarFicha(await escritura('tarea',Object.assign(p,d,{operacion:a==='fechaTarea'?'fecha':a==='reiterarTarea'?'reiterar':'estado',estado:a==='reabrirTarea'?'Pendiente':'Cumplida'}))));return;
+ }
+ if(a==='pericia'){
+  const paso=b.dataset.paso;
+  const html=paso==='fecha'?'<label>Fecha otorgada<input name="fecha" type="date" required value="'+esc(c.periciaFecha)+'"></label>':paso==='realizada'?'<label>Fecha de realización<input name="fecha" type="date" max="'+S.meta.hoy+'" value="'+S.meta.hoy+'" required></label><p>Se creará el seguimiento del dictamen como prueba principal.</p>':'<p>Confirmar: '+(paso==='solicitar'?'solicitar fecha de pericia':'designar la pericia para el '+fmt(c.periciaFecha))+'.</p>';
+  abrirDialogo('Seguimiento de pericia',html,async d=>aplicarFicha(await escritura('pericia',Object.assign(d,{id:c.id,version:c.version,paso}))));return;
+ }
+ if(a==='orac'){
+  const paso=b.dataset.paso;
+  abrirDialogo('ORAC · '+({remitir:'Remisión',tramite:'En trámite',reiterar:'Gestión / reiteración',devolver:'Devolución'}[paso]),'<label>Fecha<input name="fecha" type="date" required max="'+S.meta.hoy+'" value="'+S.meta.hoy+'"></label>'+(paso==='remitir'?'<label class="check"><input name="consentimiento" type="checkbox" required>Confirmo consentimiento de la/s víctima/s para remitir a ORAC.</label>':''),async d=>aplicarFicha(await escritura('orac',Object.assign(d,{id:c.id,version:c.version,operacion:paso}))));return;
+ }
+ if(a==='estadoCausa'){abrirDialogo('Estado de causa','<label>Estado<select name="estado">'+opciones(['En seguimiento','Cerrada'],c.estado)+'</select></label><p class="muted">La evaluación pendiente se cierra desde su tarea. No puede cerrarse una causa con seguimiento pendiente.</p>',async d=>aplicarFicha(await escritura('estadoCausa',Object.assign(d,{id:c.id,version:c.version}))));return;}
+ if(a==='eliminar'){
+  abrirDialogo('Eliminar causa definitivamente','<p><strong>Esta acción eliminará la causa, sus medidas, tareas y bitácora asociada. ¿Desea continuar?</strong></p><p>La bitácora de esta causa también se elimina. Conservá una copia de seguridad si corresponde.</p><label>Para confirmar, escribí la IPP: '+esc(c.ipp)+'<input name="confirmacion" required autocomplete="off"></label>',async d=>{if(d.confirmacion!==c.ipp)throw new Error('La IPP no coincide.');await escritura('eliminar',Object.assign(d,{id:c.id,version:c.version}));S.ficha=null;S.vista='tablero';await actualizarTablero();aviso('Causa eliminada definitivamente.');},true);return;
+ }
+ if(a==='probarConcurrencia'){
+  ocupado(true);try{const crear=n=>rpc('agregarTarea',{id:c.id,version:c.version,tarea:{tipo:'Otra',descripcion:'PRUEBA CONCURRENCIA '+n}},true);const r=await Promise.allSettled([crear('A'),crear('B')]);const ok=r.filter(x=>x.status==='fulfilled').length,conf=r.filter(x=>x.status==='rejected'&&/Otra usuaria/.test(x.reason.message)).length;await mostrarFicha(c.id);aviso(ok===1&&conf===1?'Concurrencia verificada: una escritura guardada y otra rechazada por versión desactualizada.':'Resultado inesperado. Revisá la bitácora y la configuración.',!(ok===1&&conf===1));}finally{ocupado(false);}return;
+ }
+}
+document.addEventListener('click',e=>{const b=e.target.closest('button[data-action]');if(b){e.preventDefault();accion(b).catch(e=>aviso(e.message,true));}});
+document.addEventListener('submit',async e=>{
+ e.preventDefault();const form=e.target;if(S.busy)return;
+ try{
+  if(form.id==='login'){await iniciar($('#usuaria').value);return;}
+  if(form.id==='filtros'){S.filtros=leerFiltros();await actualizarTablero();return;}
+  if(form.id==='causaForm'){
+   const c=leerCausa();if(S.editando){aplicarFicha(await escritura('editar',{id:S.editando.id,version:S.editando.version,causa:c}));aviso('Cambios guardados. Revisá las nuevas diligencias propuestas; se activan solo al confirmarlas.');}
+   else{ocupado(true);try{S.analisis=await rpc('analizar',{causa:c});S.analisisRevision=S.revision;renderRevision();}finally{ocupado(false);}}return;
+  }
+  if(form.id==='dialogForm'){await dialogCallback(datosDialogo(form));$('#dialogo').close();}
+ }catch(err){aviso(err.message,true);}
+});
+document.addEventListener('input',e=>{if(e.target.closest('#causaForm'))invalidar();});
+document.addEventListener('change',e=>{
+ const target=e.target;if(target.closest('#dialogForm')&&target.name==='tipo'&&$('#dialogForm [name=plazo]')){const tipo=target.value;$('#dialogForm [name=plazo]').value=S.meta.config[tipo]===undefined?S.meta.config.GENERAL:S.meta.config[tipo];$('#dialogForm [name=naturaleza]').value=tipo==='AMPLIACION_MEDICA'?'Ampliación':tipo==='ESPECIALISTA'?'Nueva pericia':'Requerimiento';$('#dialogForm [name=necesariaEvaluacion]').checked=['AMPLIACION_MEDICA','ESPECIALISTA','DICTAMEN_MEDICO','DICTAMEN_ACCIDENTOLOGICO'].includes(tipo);}
+ if(target.closest('#causaForm')){
+  invalidar();if(['tipo','resultado','d_camaras','d_preservacion','d_testigos','d_historia','principalTipo','estudiosExcepcionales'].includes(target.name)){const c=leerCausa();if(target.name==='tipo'){c.datos={};c.principalTipo='';}if(target.name==='d_camaras'&&c.datos.camaras==='Recibidas')c.datos.preservacion='Videofilmaciones recibidas';if(target.name==='d_camaras'&&c.datos.camaras!=='Recibidas'&&c.datos.preservacion==='Videofilmaciones recibidas')c.datos.preservacion='No consta solicitud de preservación';if(target.name==='d_preservacion'&&c.datos.preservacion==='Videofilmaciones recibidas')c.datos.camaras='Recibidas';renderPlantilla(c);}
+ }
+ if(target.matches('[data-sugerencia],[data-nueva],#fechaDespacho'))generarDespacho();
+ if(target.closest('#filtros')&&target.type!=='search'){S.filtros=leerFiltros();actualizarTablero().catch(()=>{});}
+});
+setInterval(()=>{if(S.usuaria&&S.vista==='tablero'&&!S.busy&&!$('#dialogo').open&&!$('#filtros').contains(document.activeElement))actualizarTablero(true).catch(()=>{$('#actualizado').textContent='Sin conexión: actualizar al restablecerse.';});},60000);
+try{const guardada=sessionStorage.getItem('ufij22_demo_usuaria');if(usuarios.includes(guardada))iniciar(guardada).catch(()=>{});}catch(e){}
+</script>
+
+</body></html>
